@@ -1,0 +1,14 @@
+{
+  "name": "transparent-time-manager",
+  "version": "1.0.0",
+  "description": "Transparent background time management app with clock, timer, and alert",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
