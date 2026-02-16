@@ -1,3 +1,5 @@
 @echo off
 cd /d "%~dp0"
-npx electron .
+echo Time Manager を起動しています...
+python app.py
+pause
