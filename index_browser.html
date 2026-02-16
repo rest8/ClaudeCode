@@ -10,24 +10,20 @@
 
     body {
       font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-      background: #0f0f14;
+      background: transparent;
       color: #e0e0e0;
       user-select: none;
       overflow: hidden;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
     }
 
     /* ── App Shell ── */
     #app {
-      width: 420px;
-      height: 520px;
+      width: 100vw;
+      height: 100vh;
       display: flex;
       flex-direction: column;
       border-radius: 16px;
-      background: rgba(15, 15, 20, 0.85);
+      background: rgba(15, 15, 20, 0.35);
       backdrop-filter: blur(18px);
       -webkit-backdrop-filter: blur(18px);
       border: 1px solid rgba(255, 255, 255, 0.08);
@@ -50,6 +46,28 @@
       opacity: 0.6;
       text-transform: uppercase;
     }
+
+    #titlebar .controls {
+      display: flex;
+      gap: 6px;
+    }
+
+    #titlebar .controls button {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      opacity: 0.7;
+    }
+
+    #titlebar .controls button:hover { opacity: 1; }
+
+    .btn-pin { background: #4cd964; }
+    .btn-pin.unpinned { background: #666; }
+    .btn-min { background: #ffcc00; }
+    .btn-close { background: #ff3b30; }
 
     /* ── Tab Navigation ── */
     #tabs {
@@ -465,6 +483,11 @@
   <!-- Title bar -->
   <div id="titlebar">
     <span class="title">Time Manager</span>
+    <div class="controls">
+      <button class="btn-pin" id="pinBtn" title="Always on top"></button>
+      <button class="btn-min" id="minBtn" title="Minimize"></button>
+      <button class="btn-close" id="closeBtn" title="Close"></button>
+    </div>
   </div>
 
   <!-- Tabs -->
@@ -538,6 +561,22 @@
 </div>
 
 <script>
+  // ── Window controls via pywebview ──
+  let pinned = true;
+  document.getElementById('pinBtn').addEventListener('click', () => {
+    pinned = !pinned;
+    document.getElementById('pinBtn').classList.toggle('unpinned', !pinned);
+    if (window.pywebview) {
+      pywebview.api.toggle_pin(pinned);
+    }
+  });
+  document.getElementById('minBtn').addEventListener('click', () => {
+    if (window.pywebview) pywebview.api.minimize();
+  });
+  document.getElementById('closeBtn').addEventListener('click', () => {
+    if (window.pywebview) pywebview.api.close_window();
+  });
+
   // ── Tabs ──
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {

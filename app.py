@@ -1,49 +1,53 @@
 """
-Time Manager - Python launcher
-Pythonの標準ライブラリだけで動作します。追加インストール不要です。
+Time Manager - Python native window app
+pywebview を使って透明背景のネイティブウィンドウで動作します。
 使い方: python app.py
+初回のみ: pip install pywebview
 """
 
-import http.server
 import os
-import sys
-import threading
-import webbrowser
+import webview
 
-PORT = 8080
+
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
+HTML_FILE = os.path.join(DIRECTORY, "index_browser.html")
+
+window = None
 
 
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=DIRECTORY, **kwargs)
+class Api:
+    """JavaScript から呼び出せるPython API"""
 
-    def do_GET(self):
-        # Serve index_browser.html as the default page
-        if self.path == "/" or self.path == "":
-            self.path = "/index_browser.html"
-        return super().do_GET()
+    def toggle_pin(self, pinned):
+        if window:
+            window.on_top = pinned
 
-    def log_message(self, format, *args):
-        # Suppress noisy access logs
-        pass
+    def minimize(self):
+        if window:
+            window.minimize()
+
+    def close_window(self):
+        if window:
+            window.destroy()
 
 
 def main():
-    server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"Time Manager を起動しています...")
-    print(f"ブラウザで http://127.0.0.1:{PORT} を開いています...")
-    print(f"終了するには Ctrl+C を押してください。")
+    global window
+    api = Api()
 
-    # Open browser after a short delay
-    threading.Timer(0.5, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()
+    window = webview.create_window(
+        "Time Manager",
+        url=HTML_FILE,
+        width=420,
+        height=520,
+        resizable=True,
+        frameless=True,
+        transparent=True,
+        on_top=True,
+        js_api=api,
+    )
 
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n終了しました。")
-        server.server_close()
-        sys.exit(0)
+    webview.start()
 
 
 if __name__ == "__main__":
