@@ -223,6 +223,7 @@ class MarketDashboard:
         self.prev_fx = {}
         self.prev_stocks = {}
         self.prev_platinum = None
+        self._minimized = False
 
         self._build_ui()
         self._update_clocks()
@@ -270,6 +271,8 @@ class MarketDashboard:
             title_bar, text="MARKET DASHBOARD",
             font=FONT_TITLE, bg=BG, fg=TITLE_FG, anchor="w"
         ).pack(side="left")
+
+        # 閉じるボタン
         close_btn = tk.Label(
             title_bar, text="\u2715", font=FONT_CLOSE,
             bg=BG, fg=CLOSE_FG, cursor="hand2"
@@ -279,11 +282,26 @@ class MarketDashboard:
         close_btn.bind("<Enter>", lambda e: close_btn.config(fg=CLOSE_HOVER))
         close_btn.bind("<Leave>", lambda e: close_btn.config(fg=CLOSE_FG))
 
+        # 最小化ボタン
+        self._min_btn = tk.Label(
+            title_bar, text="\u2013", font=FONT_CLOSE,
+            bg=BG, fg=FG_DIM, cursor="hand2"
+        )
+        self._min_btn.pack(side="right", padx=(0, 6))
+        self._min_btn.bind("<Button-1>", lambda e: self._toggle_minimize())
+        self._min_btn.bind("<Enter>", lambda e: self._min_btn.config(fg=FG))
+        self._min_btn.bind("<Leave>", lambda e: self._min_btn.config(fg=FG_DIM))
+
         # 区切り線
-        tk.Frame(main, bg=ACCENT, height=1).pack(fill="x", padx=6)
+        self._accent_line = tk.Frame(main, bg=ACCENT, height=1)
+        self._accent_line.pack(fill="x", padx=6)
+
+        # コンテンツ部分（最小化時に非表示にするコンテナ）
+        self._content_frame = tk.Frame(main, bg=BG)
+        self._content_frame.pack(fill="x")
 
         # ① 時刻
-        card = self._make_card(main, "WORLD CLOCK")
+        card = self._make_card(self._content_frame, "WORLD CLOCK")
         for i, (name, tz) in enumerate(TIMEZONES):
             if i > 0:
                 self._make_separator(card)
@@ -301,7 +319,7 @@ class MarketDashboard:
             self.clock_labels[tz] = lbl
 
         # ② 為替
-        card = self._make_card(main, "FOREX")
+        card = self._make_card(self._content_frame, "FOREX")
         for i, name in enumerate(FX_SYMBOLS):
             if i > 0:
                 self._make_separator(card)
@@ -324,7 +342,7 @@ class MarketDashboard:
             self.fx_labels[name] = (lbl, change_lbl)
 
         # ③ プラチナ先物
-        card = self._make_card(main, "PLATINUM FUTURES")
+        card = self._make_card(self._content_frame, "PLATINUM FUTURES")
         row = tk.Frame(card, bg=CARD_BG)
         row.pack(fill="x")
         tk.Label(
@@ -343,7 +361,7 @@ class MarketDashboard:
         self.platinum_label.pack(side="right")
 
         # ④ 株価
-        card = self._make_card(main, "STOCKS")
+        card = self._make_card(self._content_frame, "STOCKS")
         for i, name in enumerate(STOCK_SYMBOLS):
             if i > 0:
                 self._make_separator(card)
@@ -366,12 +384,27 @@ class MarketDashboard:
             self.stock_labels[name] = (lbl, change_lbl)
 
         # ステータスバー
-        tk.Frame(main, bg=CARD_BORDER, height=1).pack(fill="x", padx=6, pady=(4, 0))
+        tk.Frame(self._content_frame, bg=CARD_BORDER, height=1).pack(
+            fill="x", padx=6, pady=(4, 0)
+        )
         self.status_label = tk.Label(
-            main, text="Starting...", font=FONT_STATUS,
+            self._content_frame, text="Starting...", font=FONT_STATUS,
             bg=BG, fg=FG_DIM, anchor="e", padx=10, pady=4
         )
         self.status_label.pack(fill="x")
+
+    def _toggle_minimize(self):
+        """コンテンツの表示/非表示を切り替え"""
+        if self._minimized:
+            self._accent_line.pack(fill="x", padx=6)
+            self._content_frame.pack(fill="x")
+            self._min_btn.config(text="\u2013")  # –
+            self._minimized = False
+        else:
+            self._content_frame.pack_forget()
+            self._accent_line.pack_forget()
+            self._min_btn.config(text="\u002b")  # +
+            self._minimized = True
 
     def _update_clocks(self):
         for tz_name, tz_str in TIMEZONES:
