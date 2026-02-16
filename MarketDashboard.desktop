@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Market Dashboard
+Comment=Market Data Dashboard - 為替・株価・プラチナ先物
+Exec=bash -c 'cd "$(dirname "%k")" && python3 market_dashboard.py'
+Icon=/home/user/ClaudeCode/market_dashboard.svg
+Path=/home/user/ClaudeCode
+Terminal=false
+Categories=Finance;Utility;
+StartupNotify=false
