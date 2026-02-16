@@ -21,7 +21,8 @@ logging.basicConfig(
 
 # --- 設定 ---
 CLOCK_INTERVAL_MS = 1000
-MARKET_INTERVAL_S = 60
+FX_INTERVAL_MS = 1000       # 為替・プラチナ: 1秒
+STOCK_INTERVAL_MS = 60000   # 株価: 60秒
 
 TIMEZONES = [
     ("Tokyo", "Asia/Tokyo"),
@@ -49,11 +50,8 @@ STOCK_SYMBOLS = {
     "Olympus": "7733.T",
 }
 
-ALL_SYMBOLS_LIST = (
-    list(FX_SYMBOLS.values())
-    + [PLATINUM_SYMBOL]
-    + list(STOCK_SYMBOLS.values())
-)
+FX_PLATINUM_SYMBOLS_LIST = list(FX_SYMBOLS.values()) + [PLATINUM_SYMBOL]
+STOCK_SYMBOLS_LIST = list(STOCK_SYMBOLS.values())
 
 # --- カラーパレット ---
 BG = "#0f0f1a"
@@ -150,11 +148,27 @@ def _fetch_via_http(symbols):
     return data
 
 
-def fetch_all_market_data(symbols):
-    """3段階フォールバックでマーケットデータを取得"""
+def fetch_all_market_data(symbols, fast=False):
+    """マーケットデータを取得。fast=True の場合は軽量な方法を優先"""
     data = {}
 
-    # 方法1: yf.download()
+    if fast:
+        # 高頻度更新用: HTTP直接 → yf.Ticker (軽量な順)
+        try:
+            data = _fetch_via_http(symbols)
+        except Exception as e:
+            logging.debug("HTTP fetch failed: %s", e)
+
+        missing = [s for s in symbols if s not in data]
+        if missing:
+            try:
+                extra = _fetch_via_yf_ticker(missing)
+                data.update(extra)
+            except Exception as e:
+                logging.debug("yf.Ticker fallback failed: %s", e)
+        return data
+
+    # 通常更新: yf.download() → yf.Ticker → HTTP
     try:
         logging.info("Trying yf.download()...")
         data = _fetch_via_yf_download(symbols)
@@ -162,25 +176,19 @@ def fetch_all_market_data(symbols):
     except Exception as e:
         logging.warning("yf.download() failed: %s", e)
 
-    # 足りないシンボルを方法2で補完
     missing = [s for s in symbols if s not in data]
     if missing:
         try:
-            logging.info("Trying yf.Ticker for %d missing symbols...", len(missing))
             extra = _fetch_via_yf_ticker(missing)
             data.update(extra)
-            logging.info("yf.Ticker got %d more symbols", len(extra))
         except Exception as e:
             logging.warning("yf.Ticker() failed: %s", e)
 
-    # まだ足りないシンボルを方法3で補完
     missing = [s for s in symbols if s not in data]
     if missing:
         try:
-            logging.info("Trying HTTP for %d missing symbols...", len(missing))
             extra = _fetch_via_http(missing)
             data.update(extra)
-            logging.info("HTTP got %d more symbols", len(extra))
         except Exception as e:
             logging.warning("HTTP fetch failed: %s", e)
 
@@ -218,7 +226,8 @@ class MarketDashboard:
 
         self._build_ui()
         self._update_clocks()
-        self._schedule_market_update()
+        self._schedule_fx_update()
+        self._schedule_stock_update()
 
     def _on_drag_start(self, event):
         self._drag_data["x"] = event.x
@@ -370,29 +379,33 @@ class MarketDashboard:
             self.clock_labels[tz_str].config(text=now.strftime("%m/%d %H:%M:%S"))
         self.root.after(CLOCK_INTERVAL_MS, self._update_clocks)
 
-    def _schedule_market_update(self):
-        self._fetch_market_data()
-        self.root.after(MARKET_INTERVAL_S * 1000, self._schedule_market_update)
+    # --- 為替・プラチナ (毎秒更新) ---
+    def _schedule_fx_update(self):
+        self._fetch_fx_data()
+        self.root.after(FX_INTERVAL_MS, self._schedule_fx_update)
 
-    def _fetch_market_data(self):
-        self.status_label.config(text="Fetching data...")
-
+    def _fetch_fx_data(self):
         def worker():
             try:
-                data = fetch_all_market_data(ALL_SYMBOLS_LIST)
-                got = len(data)
-                total = len(ALL_SYMBOLS_LIST)
-                msg = None
-                if got == 0:
-                    msg = "All fetches failed - check network"
-                elif got < total:
-                    msg = f"{total - got} symbol(s) unavailable"
-                self.root.after(0, lambda: self._apply_market_data(data, msg))
+                data = fetch_all_market_data(FX_PLATINUM_SYMBOLS_LIST, fast=True)
+                self.root.after(0, lambda: self._apply_fx_data(data))
             except Exception as e:
-                logging.exception("fetch_market_data top-level error")
-                self.root.after(0, lambda: self.status_label.config(
-                    text=f"Error: {str(e)[:40]}"
-                ))
+                logging.debug("FX fetch error: %s", e)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # --- 株価 (60秒更新) ---
+    def _schedule_stock_update(self):
+        self._fetch_stock_data()
+        self.root.after(STOCK_INTERVAL_MS, self._schedule_stock_update)
+
+    def _fetch_stock_data(self):
+        def worker():
+            try:
+                data = fetch_all_market_data(STOCK_SYMBOLS_LIST)
+                self.root.after(0, lambda: self._apply_stock_data(data))
+            except Exception as e:
+                logging.debug("Stock fetch error: %s", e)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -413,7 +426,7 @@ class MarketDashboard:
         sign = "+" if pct >= 0 else ""
         return f"{sign}{pct:.2f}%"
 
-    def _apply_market_data(self, data, error_msg=None):
+    def _apply_fx_data(self, data):
         now = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%H:%M:%S")
 
         # 為替
@@ -427,9 +440,6 @@ class MarketDashboard:
                     text=self._change_text(price, prev_close), fg=color
                 )
                 self.prev_fx[name] = price
-            else:
-                lbl.config(text="N/A", fg=FG_DIM)
-                change_lbl.config(text="")
 
         # プラチナ
         price, prev_close = data.get(PLATINUM_SYMBOL, (None, None))
@@ -440,11 +450,12 @@ class MarketDashboard:
                 text=self._change_text(price, prev_close), fg=color
             )
             self.prev_platinum = price
-        else:
-            self.platinum_label.config(text="N/A", fg=FG_DIM)
-            self.platinum_change_label.config(text="")
 
-        # 株価
+        self.status_label.config(text=f"FX {now}  |  1s interval")
+
+    def _apply_stock_data(self, data):
+        now = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%H:%M:%S")
+
         for name, sym in STOCK_SYMBOLS.items():
             price, prev_close = data.get(sym, (None, None))
             lbl, change_lbl = self.stock_labels[name]
@@ -459,14 +470,8 @@ class MarketDashboard:
                     text=self._change_text(price, prev_close), fg=color
                 )
                 self.prev_stocks[name] = price
-            else:
-                lbl.config(text="N/A", fg=FG_DIM)
-                change_lbl.config(text="")
 
-        status = f"Updated {now}  |  60s interval"
-        if error_msg:
-            status += f"  |  {error_msg}"
-        self.status_label.config(text=status)
+        self.status_label.config(text=f"Stocks {now}  |  60s interval")
 
     def run(self):
         self.root.mainloop()
