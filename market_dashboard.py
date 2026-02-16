@@ -204,13 +204,13 @@ class MarketDashboard:
                 + list(STOCK_SYMBOLS.values())
             )
             try:
-                tickers = yf.Tickers(" ".join(all_symbols))
                 data = {}
                 for sym in all_symbols:
                     try:
-                        info = tickers.tickers[sym].fast_info
-                        price = info.get("lastPrice") or info.get("last_price")
-                        prev = info.get("previousClose") or info.get("previous_close")
+                        ticker = yf.Ticker(sym)
+                        info = ticker.fast_info
+                        price = getattr(info, "last_price", None)
+                        prev = getattr(info, "previous_close", None)
                         data[sym] = (price, prev)
                     except Exception:
                         data[sym] = (None, None)
