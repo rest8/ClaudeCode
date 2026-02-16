@@ -8,10 +8,16 @@
     /* ── Reset & Base ── */
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
-    /* #010101 = color key: this exact color becomes fully transparent + click-through */
+    /*
+     * #00FF00 = chroma key color.
+     * Win32 SetLayeredWindowAttributes makes all #00FF00 pixels:
+     *   - Fully transparent (invisible)
+     *   - Click-through (mouse events pass to windows behind)
+     * Everything else is rendered with slight transparency via LWA_ALPHA.
+     */
     body {
       font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-      background: #010101;
+      background: #00FF00;
       color: #e0e0e0;
       user-select: none;
       overflow: hidden;
@@ -23,37 +29,36 @@
       height: 100vh;
       display: flex;
       flex-direction: column;
-      background: #010101;
+      background: transparent; /* green shows through → click-through */
       overflow: hidden;
-      padding: 8px;
     }
 
-    /* ── Title Bar ── */
+    /* ── Title Bar (visible + draggable) ── */
     #titlebar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 4px 8px;
+      padding: 6px 10px;
+      background: #181822;
       flex-shrink: 0;
     }
 
     #titlebar .title {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
-      letter-spacing: 1px;
-      color: rgba(255, 255, 255, 0.7);
+      letter-spacing: 1.5px;
+      color: rgba(255, 255, 255, 0.6);
       text-transform: uppercase;
-      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9), 0 0 12px rgba(0, 0, 0, 0.7);
     }
 
     #titlebar .controls {
       display: flex;
-      gap: 6px;
+      gap: 7px;
     }
 
     #titlebar .controls button {
-      width: 14px;
-      height: 14px;
+      width: 13px;
+      height: 13px;
       border-radius: 50%;
       border: none;
       cursor: pointer;
@@ -68,12 +73,12 @@
     .btn-min { background: #ffcc00; }
     .btn-close { background: #ff3b30; }
 
-    /* ── Tab Navigation ── */
+    /* ── Tab Navigation (visible bar) ── */
     #tabs {
       display: flex;
-      justify-content: center;
-      gap: 4px;
-      padding: 4px 0 8px;
+      gap: 2px;
+      padding: 4px 6px;
+      background: #181822;
       flex-shrink: 0;
     }
 
@@ -81,21 +86,20 @@
       flex: 1;
       padding: 7px 0;
       border: none;
-      border-radius: 8px;
-      background: rgba(30, 30, 40, 0.85);
-      color: rgba(255, 255, 255, 0.5);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.07);
+      color: rgba(255, 255, 255, 0.45);
       font-size: 12px;
       font-weight: 600;
       letter-spacing: 0.5px;
       cursor: pointer;
       transition: all 0.25s ease;
-      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
     }
 
-    .tab-btn:hover { background: rgba(50, 50, 65, 0.9); }
+    .tab-btn:hover { background: rgba(255, 255, 255, 0.12); color: rgba(255,255,255,0.7); }
 
     .tab-btn.active {
-      background: rgba(60, 80, 160, 0.85);
+      background: rgba(80, 110, 200, 0.5);
       color: #a0c4ff;
     }
 
@@ -108,114 +112,142 @@
       padding: 10px 12px 12px;
       flex: 1;
       overflow-y: auto;
+      background: transparent; /* green → click-through */
     }
 
     .panel.active { display: flex; }
 
-    /* ── Text shadow for readability over any desktop ── */
-    .text-glow {
-      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95), 0 0 20px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 0, 0, 0.5);
-    }
-
     /* ── Clock ── */
     #clock-time {
-      font-size: 60px;
+      font-size: 64px;
       font-weight: 200;
       letter-spacing: 2px;
-      margin-top: 20px;
+      margin-top: 30px;
+      color: #fff;
       font-variant-numeric: tabular-nums;
-      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.95), 0 0 30px rgba(0, 0, 0, 0.8);
+      text-shadow:
+        0 0 10px rgba(0, 0, 0, 0.95),
+        0 0 20px rgba(0, 0, 0, 0.8),
+        0 2px 4px rgba(0, 0, 0, 1);
     }
 
     #clock-seconds {
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 300;
-      opacity: 0.55;
-      margin-top: -4px;
+      color: rgba(255, 255, 255, 0.6);
+      margin-top: -2px;
       font-variant-numeric: tabular-nums;
-      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
+      text-shadow: 0 0 8px rgba(0, 0, 0, 0.95), 0 2px 4px rgba(0, 0, 0, 1);
     }
 
     #clock-date {
       font-size: 14px;
-      opacity: 0.5;
-      margin-top: 12px;
+      color: rgba(255, 255, 255, 0.55);
+      margin-top: 14px;
       font-weight: 400;
-      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
+      text-shadow: 0 0 8px rgba(0, 0, 0, 0.95), 0 2px 4px rgba(0, 0, 0, 1);
     }
 
     /* ── Timer ── */
+    .timer-ring-wrap {
+      position: relative;
+      margin-top: 10px;
+    }
+
+    .timer-ring-wrap svg { transform: rotate(-90deg); }
+
+    .timer-ring-bg {
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.15);
+      stroke-width: 4;
+    }
+
+    .timer-ring-fg {
+      fill: none;
+      stroke: #7eb4ff;
+      stroke-width: 4;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.5s linear;
+      filter: drop-shadow(0 0 6px rgba(126, 180, 255, 0.5));
+    }
+
+    .timer-ring-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+
     .timer-display {
-      font-size: 54px;
+      font-size: 48px;
       font-weight: 200;
       letter-spacing: 2px;
-      margin: 16px 0 8px;
+      color: #fff;
       font-variant-numeric: tabular-nums;
-      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.95), 0 0 30px rgba(0, 0, 0, 0.8);
+      text-shadow: 0 0 10px rgba(0,0,0,0.95), 0 2px 4px rgba(0,0,0,1);
     }
 
     .timer-label {
-      font-size: 11px;
-      opacity: 0.45;
+      font-size: 10px;
+      color: rgba(255,255,255,0.4);
       letter-spacing: 2px;
       text-transform: uppercase;
-      margin-bottom: 20px;
-      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+      text-shadow: 0 0 6px rgba(0,0,0,0.9);
     }
 
     .timer-presets {
       display: flex;
-      gap: 8px;
-      margin-bottom: 16px;
+      gap: 6px;
+      margin: 14px 0 12px;
       flex-wrap: wrap;
       justify-content: center;
     }
 
     .preset-btn {
-      padding: 6px 14px;
-      border-radius: 20px;
-      border: 1px solid rgba(100, 140, 255, 0.25);
-      background: rgba(30, 30, 50, 0.85);
-      color: #bbb;
-      font-size: 12px;
+      padding: 5px 13px;
+      border-radius: 16px;
+      border: 1px solid rgba(100, 140, 255, 0.3);
+      background: #1e1e32;
+      color: #aaa;
+      font-size: 11px;
       cursor: pointer;
       transition: all 0.2s;
     }
 
     .preset-btn:hover {
-      background: rgba(60, 80, 160, 0.85);
-      border-color: rgba(100, 140, 255, 0.5);
+      background: #2a3070;
+      border-color: rgba(100, 140, 255, 0.6);
       color: #7eb4ff;
     }
 
     .timer-inputs {
       display: flex;
-      gap: 6px;
+      gap: 4px;
       align-items: center;
-      margin-bottom: 20px;
+      margin-bottom: 14px;
     }
 
     .timer-inputs input {
-      width: 52px;
-      padding: 6px;
-      border-radius: 8px;
+      width: 48px;
+      padding: 5px;
+      border-radius: 6px;
       border: 1px solid rgba(255, 255, 255, 0.15);
-      background: rgba(30, 30, 40, 0.9);
+      background: #1a1a28;
       color: #e0e0e0;
-      font-size: 16px;
+      font-size: 15px;
       text-align: center;
       outline: none;
-      transition: border-color 0.2s;
     }
 
-    .timer-inputs input:focus {
-      border-color: rgba(100, 140, 255, 0.6);
-    }
+    .timer-inputs input:focus { border-color: rgba(100, 140, 255, 0.6); }
 
     .timer-inputs span {
-      font-size: 13px;
-      opacity: 0.5;
-      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      text-shadow: 0 0 6px rgba(0,0,0,0.9);
     }
 
     .timer-controls {
@@ -224,44 +256,30 @@
     }
 
     .action-btn {
-      padding: 10px 28px;
-      border-radius: 24px;
+      padding: 9px 26px;
+      border-radius: 20px;
       border: none;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       cursor: pointer;
       transition: all 0.2s;
       letter-spacing: 0.5px;
     }
 
-    .btn-start {
-      background: rgba(30, 80, 40, 0.9);
-      color: #4cd964;
-    }
-
-    .btn-start:hover { background: rgba(40, 100, 50, 0.95); }
-
-    .btn-pause {
-      background: rgba(80, 65, 10, 0.9);
-      color: #ffcc00;
-    }
-
-    .btn-pause:hover { background: rgba(100, 80, 15, 0.95); }
-
-    .btn-reset {
-      background: rgba(80, 25, 25, 0.9);
-      color: #ff6b6b;
-    }
-
-    .btn-reset:hover { background: rgba(100, 30, 30, 0.95); }
+    .btn-start  { background: #1a4d28; color: #4cd964; }
+    .btn-start:hover { background: #236634; }
+    .btn-pause  { background: #4d3d0a; color: #ffcc00; }
+    .btn-pause:hover { background: #66500f; }
+    .btn-reset  { background: #4d1a1a; color: #ff6b6b; }
+    .btn-reset:hover { background: #662222; }
 
     /* ── Alert / Alarms ── */
     .alert-list {
       width: 100%;
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      margin-bottom: 14px;
+      gap: 6px;
+      margin-bottom: 10px;
       flex: 1;
       overflow-y: auto;
     }
@@ -272,8 +290,8 @@
       justify-content: space-between;
       padding: 10px 14px;
       border-radius: 10px;
-      background: rgba(30, 30, 40, 0.88);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: #1a1a28;
+      border: 1px solid rgba(255, 255, 255, 0.06);
     }
 
     .alert-item .alert-time {
@@ -284,7 +302,7 @@
 
     .alert-item .alert-label-text {
       font-size: 11px;
-      opacity: 0.45;
+      opacity: 0.4;
       margin-top: 2px;
     }
 
@@ -297,8 +315,8 @@
     /* Toggle switch */
     .toggle {
       position: relative;
-      width: 38px;
-      height: 20px;
+      width: 36px;
+      height: 19px;
       cursor: pointer;
     }
 
@@ -307,7 +325,7 @@
     .toggle .slider {
       position: absolute;
       inset: 0;
-      border-radius: 20px;
+      border-radius: 19px;
       background: rgba(255, 255, 255, 0.15);
       transition: background 0.3s;
     }
@@ -315,8 +333,8 @@
     .toggle .slider::before {
       content: '';
       position: absolute;
-      width: 16px;
-      height: 16px;
+      width: 15px;
+      height: 15px;
       border-radius: 50%;
       background: #aaa;
       top: 2px;
@@ -324,14 +342,8 @@
       transition: all 0.3s;
     }
 
-    .toggle input:checked + .slider {
-      background: rgba(76, 217, 100, 0.45);
-    }
-
-    .toggle input:checked + .slider::before {
-      transform: translateX(18px);
-      background: #4cd964;
-    }
+    .toggle input:checked + .slider { background: rgba(76, 217, 100, 0.45); }
+    .toggle input:checked + .slider::before { transform: translateX(17px); background: #4cd964; }
 
     .delete-alert {
       background: none;
@@ -348,63 +360,51 @@
 
     .add-alert-row {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       width: 100%;
       align-items: center;
       flex-shrink: 0;
-    }
-
-    .add-alert-row input[type="time"] {
-      flex: 0 0 auto;
+      background: #1a1a28;
       padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      background: rgba(30, 30, 40, 0.9);
-      color: #e0e0e0;
-      font-size: 15px;
-      outline: none;
+      border-radius: 10px;
     }
 
-    .add-alert-row input[type="time"]:focus {
-      border-color: rgba(100, 140, 255, 0.6);
-    }
-
+    .add-alert-row input[type="time"],
     .add-alert-row input[type="text"] {
-      flex: 1;
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      background: rgba(30, 30, 40, 0.9);
+      padding: 7px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: #252535;
       color: #e0e0e0;
-      font-size: 13px;
       outline: none;
     }
 
-    .add-alert-row input[type="text"]:focus {
-      border-color: rgba(100, 140, 255, 0.6);
-    }
+    .add-alert-row input[type="time"] { flex: 0 0 auto; font-size: 14px; }
+    .add-alert-row input[type="text"] { flex: 1; font-size: 12px; }
+
+    .add-alert-row input:focus { border-color: rgba(100, 140, 255, 0.5); }
 
     .btn-add {
-      padding: 8px 18px;
-      border-radius: 8px;
+      padding: 7px 16px;
+      border-radius: 6px;
       border: none;
-      background: rgba(60, 80, 160, 0.85);
+      background: #2a3070;
       color: #7eb4ff;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       cursor: pointer;
       white-space: nowrap;
       transition: background 0.2s;
     }
 
-    .btn-add:hover { background: rgba(70, 95, 190, 0.95); }
+    .btn-add:hover { background: #354090; }
 
     /* ── Notification Overlay ── */
     #notification-overlay {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(180, 40, 30, 0.92);
+      background: rgba(180, 40, 30, 0.95);
       z-index: 1000;
       align-items: center;
       justify-content: center;
@@ -431,7 +431,7 @@
 
     .btn-dismiss {
       padding: 10px 32px;
-      border-radius: 24px;
+      border-radius: 20px;
       border: none;
       background: rgba(255, 255, 255, 0.25);
       color: #fff;
@@ -444,54 +444,20 @@
     .btn-dismiss:hover { background: rgba(255, 255, 255, 0.4); }
 
     @keyframes pulseOverlay {
-      from { background: rgba(180, 40, 30, 0.88); }
-      to { background: rgba(200, 50, 40, 0.95); }
+      from { background: rgba(180, 40, 30, 0.92); }
+      to { background: rgba(200, 50, 40, 0.98); }
     }
 
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
-
-    /* ── Progress ring for timer ── */
-    .timer-ring-wrap {
-      position: relative;
-      margin-top: 8px;
-    }
-
-    .timer-ring-wrap svg {
-      transform: rotate(-90deg);
-    }
-
-    .timer-ring-bg {
-      fill: none;
-      stroke: rgba(255, 255, 255, 0.1);
-      stroke-width: 4;
-    }
-
-    .timer-ring-fg {
-      fill: none;
-      stroke: #7eb4ff;
-      stroke-width: 4;
-      stroke-linecap: round;
-      transition: stroke-dashoffset 0.5s linear;
-      filter: drop-shadow(0 0 6px rgba(126, 180, 255, 0.5));
-    }
-
-    .timer-ring-text {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
   </style>
 </head>
 <body>
 
 <div id="app">
-  <!-- Title bar -->
+  <!-- Title bar: dark background → visible + draggable -->
   <div id="titlebar" class="pywebview-drag-region">
     <span class="title">Time Manager</span>
     <div class="controls">
@@ -501,14 +467,14 @@
     </div>
   </div>
 
-  <!-- Tabs -->
+  <!-- Tabs: dark background → visible + clickable -->
   <div id="tabs">
     <button class="tab-btn active" data-tab="clock">Clock</button>
     <button class="tab-btn" data-tab="timer">Timer</button>
     <button class="tab-btn" data-tab="alert">Alert</button>
   </div>
 
-  <!-- Clock Panel -->
+  <!-- Clock Panel: green bg → transparent + click-through, text floats -->
   <div class="panel active" id="panel-clock">
     <div id="clock-time">00:00</div>
     <div id="clock-seconds">:00</div>
@@ -518,10 +484,10 @@
   <!-- Timer Panel -->
   <div class="panel" id="panel-timer">
     <div class="timer-ring-wrap">
-      <svg width="180" height="180" viewBox="0 0 180 180">
-        <circle class="timer-ring-bg" cx="90" cy="90" r="82" />
-        <circle class="timer-ring-fg" id="timerRing" cx="90" cy="90" r="82"
-                stroke-dasharray="515.22" stroke-dashoffset="0" />
+      <svg width="170" height="170" viewBox="0 0 170 170">
+        <circle class="timer-ring-bg" cx="85" cy="85" r="78" />
+        <circle class="timer-ring-fg" id="timerRing" cx="85" cy="85" r="78"
+                stroke-dasharray="490.09" stroke-dashoffset="0" />
       </svg>
       <div class="timer-ring-text">
         <div class="timer-display" id="timerDisplay">00:00</div>
@@ -530,12 +496,12 @@
     </div>
 
     <div class="timer-presets">
-      <button class="preset-btn" data-min="1">1 min</button>
-      <button class="preset-btn" data-min="5">5 min</button>
-      <button class="preset-btn" data-min="10">10 min</button>
-      <button class="preset-btn" data-min="15">15 min</button>
-      <button class="preset-btn" data-min="25">25 min</button>
-      <button class="preset-btn" data-min="60">60 min</button>
+      <button class="preset-btn" data-min="1">1m</button>
+      <button class="preset-btn" data-min="5">5m</button>
+      <button class="preset-btn" data-min="10">10m</button>
+      <button class="preset-btn" data-min="15">15m</button>
+      <button class="preset-btn" data-min="25">25m</button>
+      <button class="preset-btn" data-min="60">60m</button>
     </div>
 
     <div class="timer-inputs">
@@ -572,14 +538,12 @@
 </div>
 
 <script>
-  // ── Window controls via pywebview ──
+  // ── Window controls ──
   let pinned = true;
   document.getElementById('pinBtn').addEventListener('click', () => {
     pinned = !pinned;
     document.getElementById('pinBtn').classList.toggle('unpinned', !pinned);
-    if (window.pywebview) {
-      pywebview.api.toggle_pin(pinned);
-    }
+    if (window.pywebview) pywebview.api.toggle_pin(pinned);
   });
   document.getElementById('minBtn').addEventListener('click', () => {
     if (window.pywebview) pywebview.api.minimize();
@@ -620,7 +584,7 @@
   setInterval(updateClock, 500);
 
   // ── Timer ──
-  const CIRCUMFERENCE = 2 * Math.PI * 82;
+  const CIRCUMFERENCE = 2 * Math.PI * 78;
   let timerTotal = 0;
   let timerRemaining = 0;
   let timerInterval = null;
@@ -636,10 +600,8 @@
     const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
     const s = sec % 60;
-    if (h > 0) {
-      return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-    }
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
   }
 
   function updateTimerUI() {
@@ -664,13 +626,11 @@
       timerLabel.textContent = 'paused';
       return;
     }
-
     if (timerRemaining <= 0) {
       timerTotal = getInputSeconds();
       timerRemaining = timerTotal;
       if (timerTotal <= 0) return;
     }
-
     timerRunning = true;
     timerStartBtn.textContent = 'Pause';
     timerStartBtn.className = 'action-btn btn-pause';
@@ -705,7 +665,6 @@
   timerStartBtn.addEventListener('click', startTimer);
   timerResetBtn.addEventListener('click', resetTimer);
 
-  // Preset buttons
   document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const min = parseInt(btn.dataset.min);
@@ -717,7 +676,6 @@
     });
   });
 
-  // Initialize display
   timerDisplay.textContent = formatTimer(getInputSeconds());
   timerRing.style.strokeDasharray = CIRCUMFERENCE;
 
@@ -725,9 +683,7 @@
   let alerts = JSON.parse(localStorage.getItem('alerts') || '[]');
   let firedAlerts = new Set();
 
-  function saveAlerts() {
-    localStorage.setItem('alerts', JSON.stringify(alerts));
-  }
+  function saveAlerts() { localStorage.setItem('alerts', JSON.stringify(alerts)); }
 
   function renderAlerts() {
     const list = document.getElementById('alertList');
@@ -747,20 +703,17 @@
             <div class="slider"></div>
           </label>
           <button class="delete-alert" data-idx="${idx}">&times;</button>
-        </div>
-      `;
+        </div>`;
       list.appendChild(el);
     });
-
     list.querySelectorAll('.toggle input').forEach(cb => {
-      cb.addEventListener('change', (e) => {
+      cb.addEventListener('change', e => {
         alerts[e.target.dataset.idx].enabled = e.target.checked;
         saveAlerts();
       });
     });
-
     list.querySelectorAll('.delete-alert').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', e => {
         alerts.splice(parseInt(e.target.dataset.idx), 1);
         saveAlerts();
         renderAlerts();
@@ -780,14 +733,13 @@
 
   renderAlerts();
 
-  // Check alerts every second
   setInterval(() => {
     const now = new Date();
-    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
+    const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
     alerts.forEach(alert => {
-      if (alert.enabled && alert.time === hhmm && !firedAlerts.has(`${alert.time}-${alert.label}-${now.toDateString()}`)) {
-        firedAlerts.add(`${alert.time}-${alert.label}-${now.toDateString()}`);
+      const key = `${alert.time}-${alert.label}-${now.toDateString()}`;
+      if (alert.enabled && alert.time === hhmm && !firedAlerts.has(key)) {
+        firedAlerts.add(key);
         showNotification(alert.label || 'Alarm', alert.time);
       }
     });
@@ -795,7 +747,6 @@
 
   // ── Notification ──
   let audioCtx;
-
   function beep() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const osc = audioCtx.createOscillator();
@@ -811,7 +762,6 @@
   }
 
   let beepInterval;
-
   function showNotification(text, sub) {
     document.getElementById('notifText').textContent = text;
     document.getElementById('notifSub').textContent = sub || '';

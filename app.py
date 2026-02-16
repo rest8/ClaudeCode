@@ -1,20 +1,28 @@
 """
-Time Manager - Python native window app
-pywebview + Win32 API for true transparent click-through overlay.
-Uses color key #010101: pixels of that color become invisible and click-through.
+Time Manager - Transparent click-through overlay for Windows.
+
+Uses Win32 SetLayeredWindowAttributes with:
+  - LWA_COLORKEY: #00FF00 (green) pixels become fully transparent + click-through
+  - LWA_ALPHA: non-green pixels rendered semi-transparently (see desktop behind)
 
 Usage: python app.py
-First time: pip install pywebview
+Requires: pip install pywebview
 """
 
 import os
 import sys
 import threading
+import time
 import webview
 
 
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 HTML_FILE = os.path.join(DIRECTORY, "index_browser.html")
+
+# COLORREF for pure green: RGB(0,255,0) = 0x0000FF00
+COLOR_KEY = 0x0000FF00
+# Window-level alpha for non-green pixels (0-255). Lower = more see-through.
+WINDOW_ALPHA = 230
 
 window = None
 
@@ -37,37 +45,55 @@ class Api:
 
 def apply_click_through():
     """
-    Win32 color key transparency.
-    Makes all #010101 pixels fully transparent AND click-through.
+    Win32 layered window with color key + alpha.
+    - Green (#00FF00) pixels: fully transparent + click-through
+    - Other pixels: semi-transparent (alpha) so desktop is faintly visible
     """
     if sys.platform != "win32":
         return
 
     import ctypes
+    from ctypes import wintypes
 
     user32 = ctypes.windll.user32
 
     GWL_EXSTYLE = -20
     WS_EX_LAYERED = 0x00080000
     LWA_COLORKEY = 0x00000001
+    LWA_ALPHA = 0x00000002
 
-    # Color key in BGR format: #010101 -> 0x00010101
-    COLOR_KEY = 0x00010101
+    # Retry to find the window (may take a moment to appear)
+    hwnd = None
+    for attempt in range(20):
+        hwnd = user32.FindWindowW(None, "Time Manager")
+        if hwnd:
+            break
+        time.sleep(0.2)
 
-    hwnd = user32.FindWindowW(None, "Time Manager")
     if not hwnd:
+        print("[WARN] Could not find Time Manager window for transparency setup")
         return
 
+    # Add WS_EX_LAYERED style
     style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
-    user32.SetLayeredWindowAttributes(hwnd, COLOR_KEY, 0, LWA_COLORKEY)
+
+    # Apply color key + alpha
+    # - Pixels matching COLOR_KEY → fully transparent + click-through
+    # - Other pixels → rendered at WINDOW_ALPHA opacity
+    result = user32.SetLayeredWindowAttributes(
+        hwnd, COLOR_KEY, WINDOW_ALPHA, LWA_COLORKEY | LWA_ALPHA
+    )
+
+    if result:
+        print("[OK] Transparent click-through enabled")
+    else:
+        print("[WARN] SetLayeredWindowAttributes failed")
 
 
-def on_shown():
-    """Called after the window is displayed. Apply Win32 transparency."""
-    # Small delay to ensure the window is fully ready
-    import time
-    time.sleep(0.3)
+def on_ready():
+    """Wait for window to appear, then apply Win32 transparency."""
+    time.sleep(1.0)
     apply_click_through()
 
 
@@ -82,14 +108,14 @@ def main():
         height=520,
         resizable=True,
         frameless=True,
-        transparent=True,
+        transparent=False,
         on_top=True,
         js_api=api,
         easy_drag=False,
     )
 
-    # Apply click-through after window is shown
-    threading.Thread(target=on_shown, daemon=True).start()
+    # Apply click-through in background thread after window appears
+    threading.Thread(target=on_ready, daemon=True).start()
 
     webview.start()
 
