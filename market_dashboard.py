@@ -8,7 +8,16 @@ import tkinter as tk
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import threading
-import yfinance as yf
+import json
+import urllib.request
+import ssl
+import logging
+
+logging.basicConfig(
+    filename="market_dashboard.log",
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
 
 # --- 設定 ---
 CLOCK_INTERVAL_MS = 1000
@@ -40,6 +49,12 @@ STOCK_SYMBOLS = {
     "Olympus": "7733.T",
 }
 
+ALL_SYMBOLS_LIST = (
+    list(FX_SYMBOLS.values())
+    + [PLATINUM_SYMBOL]
+    + list(STOCK_SYMBOLS.values())
+)
+
 # --- カラーパレット ---
 BG = "#0f0f1a"
 CARD_BG = "#1a1a2e"
@@ -64,6 +79,117 @@ FONT_VALUE_BOLD = ("Consolas", 9, "bold")
 FONT_STATUS = ("Segoe UI", 7)
 FONT_CLOSE = ("Segoe UI", 9)
 
+
+# ============================================================
+# データ取得: 3段階フォールバック
+# ============================================================
+
+def _fetch_via_yf_download(symbols):
+    """方法1: yf.download() で一括取得（最も安定）"""
+    import yfinance as yf
+    df = yf.download(symbols, period="5d", group_by="ticker", progress=False, threads=True)
+    data = {}
+    for sym in symbols:
+        try:
+            if len(symbols) == 1:
+                close_series = df["Close"].dropna()
+            else:
+                close_series = df[sym]["Close"].dropna()
+            if len(close_series) >= 1:
+                price = float(close_series.iloc[-1])
+                prev = float(close_series.iloc[-2]) if len(close_series) >= 2 else None
+                data[sym] = (price, prev)
+        except Exception as e:
+            logging.debug("yf.download parse error for %s: %s", sym, e)
+    return data
+
+
+def _fetch_via_yf_ticker(symbols):
+    """方法2: yf.Ticker().history() で個別取得"""
+    import yfinance as yf
+    data = {}
+    for sym in symbols:
+        try:
+            hist = yf.Ticker(sym).history(period="5d")
+            if hist is not None and len(hist) >= 1:
+                price = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else None
+                data[sym] = (price, prev)
+        except Exception as e:
+            logging.debug("yf.Ticker history error for %s: %s", sym, e)
+    return data
+
+
+def _fetch_via_http(symbols):
+    """方法3: Yahoo Finance v8 API に直接HTTPリクエスト"""
+    ctx = ssl.create_default_context()
+    data = {}
+    for sym in symbols:
+        try:
+            url = (
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+                f"?range=5d&interval=1d"
+            )
+            req = urllib.request.Request(url, headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+            })
+            resp = urllib.request.urlopen(req, timeout=10, context=ctx)
+            body = json.loads(resp.read())
+            result = body["chart"]["result"][0]
+            meta = result["meta"]
+            price = meta.get("regularMarketPrice")
+            prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+            if price is not None:
+                data[sym] = (float(price), float(prev) if prev else None)
+        except Exception as e:
+            logging.debug("HTTP fetch error for %s: %s", sym, e)
+    return data
+
+
+def fetch_all_market_data(symbols):
+    """3段階フォールバックでマーケットデータを取得"""
+    data = {}
+
+    # 方法1: yf.download()
+    try:
+        logging.info("Trying yf.download()...")
+        data = _fetch_via_yf_download(symbols)
+        logging.info("yf.download() got %d/%d symbols", len(data), len(symbols))
+    except Exception as e:
+        logging.warning("yf.download() failed: %s", e)
+
+    # 足りないシンボルを方法2で補完
+    missing = [s for s in symbols if s not in data]
+    if missing:
+        try:
+            logging.info("Trying yf.Ticker for %d missing symbols...", len(missing))
+            extra = _fetch_via_yf_ticker(missing)
+            data.update(extra)
+            logging.info("yf.Ticker got %d more symbols", len(extra))
+        except Exception as e:
+            logging.warning("yf.Ticker() failed: %s", e)
+
+    # まだ足りないシンボルを方法3で補完
+    missing = [s for s in symbols if s not in data]
+    if missing:
+        try:
+            logging.info("Trying HTTP for %d missing symbols...", len(missing))
+            extra = _fetch_via_http(missing)
+            data.update(extra)
+            logging.info("HTTP got %d more symbols", len(extra))
+        except Exception as e:
+            logging.warning("HTTP fetch failed: %s", e)
+
+    return data
+
+
+# ============================================================
+# GUI
+# ============================================================
 
 class MarketDashboard:
     def __init__(self):
@@ -248,50 +374,22 @@ class MarketDashboard:
         self._fetch_market_data()
         self.root.after(MARKET_INTERVAL_S * 1000, self._schedule_market_update)
 
-    def _fetch_single(self, sym):
-        """個別シンボルのデータを取得（複数の方法でフォールバック）"""
-        # 方法1: history() で直近2日分を取得
-        try:
-            hist = yf.Ticker(sym).history(period="5d")
-            if hist is not None and len(hist) >= 1:
-                price = float(hist["Close"].iloc[-1])
-                prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else None
-                return (price, prev)
-        except Exception:
-            pass
-        # 方法2: fast_info
-        try:
-            info = yf.Ticker(sym).fast_info
-            price = getattr(info, "last_price", None)
-            prev = getattr(info, "previous_close", None)
-            if price is not None:
-                return (price, prev)
-        except Exception:
-            pass
-        return (None, None)
-
     def _fetch_market_data(self):
+        self.status_label.config(text="Fetching data...")
+
         def worker():
-            all_symbols = (
-                list(FX_SYMBOLS.values())
-                + [PLATINUM_SYMBOL]
-                + list(STOCK_SYMBOLS.values())
-            )
-            errors = 0
             try:
-                data = {}
-                for sym in all_symbols:
-                    result = self._fetch_single(sym)
-                    data[sym] = result
-                    if result[0] is None:
-                        errors += 1
+                data = fetch_all_market_data(ALL_SYMBOLS_LIST)
+                got = len(data)
+                total = len(ALL_SYMBOLS_LIST)
                 msg = None
-                if errors == len(all_symbols):
+                if got == 0:
                     msg = "All fetches failed - check network"
-                elif errors > 0:
-                    msg = f"{errors} symbol(s) unavailable"
+                elif got < total:
+                    msg = f"{total - got} symbol(s) unavailable"
                 self.root.after(0, lambda: self._apply_market_data(data, msg))
             except Exception as e:
+                logging.exception("fetch_market_data top-level error")
                 self.root.after(0, lambda: self.status_label.config(
                     text=f"Error: {str(e)[:40]}"
                 ))
