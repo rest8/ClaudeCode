@@ -248,6 +248,28 @@ class MarketDashboard:
         self._fetch_market_data()
         self.root.after(MARKET_INTERVAL_S * 1000, self._schedule_market_update)
 
+    def _fetch_single(self, sym):
+        """個別シンボルのデータを取得（複数の方法でフォールバック）"""
+        # 方法1: history() で直近2日分を取得
+        try:
+            hist = yf.Ticker(sym).history(period="5d")
+            if hist is not None and len(hist) >= 1:
+                price = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else None
+                return (price, prev)
+        except Exception:
+            pass
+        # 方法2: fast_info
+        try:
+            info = yf.Ticker(sym).fast_info
+            price = getattr(info, "last_price", None)
+            prev = getattr(info, "previous_close", None)
+            if price is not None:
+                return (price, prev)
+        except Exception:
+            pass
+        return (None, None)
+
     def _fetch_market_data(self):
         def worker():
             all_symbols = (
@@ -255,21 +277,23 @@ class MarketDashboard:
                 + [PLATINUM_SYMBOL]
                 + list(STOCK_SYMBOLS.values())
             )
+            errors = 0
             try:
                 data = {}
                 for sym in all_symbols:
-                    try:
-                        ticker = yf.Ticker(sym)
-                        info = ticker.fast_info
-                        price = getattr(info, "last_price", None)
-                        prev = getattr(info, "previous_close", None)
-                        data[sym] = (price, prev)
-                    except Exception:
-                        data[sym] = (None, None)
-                self.root.after(0, lambda: self._apply_market_data(data))
+                    result = self._fetch_single(sym)
+                    data[sym] = result
+                    if result[0] is None:
+                        errors += 1
+                msg = None
+                if errors == len(all_symbols):
+                    msg = "All fetches failed - check network"
+                elif errors > 0:
+                    msg = f"{errors} symbol(s) unavailable"
+                self.root.after(0, lambda: self._apply_market_data(data, msg))
             except Exception as e:
                 self.root.after(0, lambda: self.status_label.config(
-                    text=f"Error: {str(e)[:30]}"
+                    text=f"Error: {str(e)[:40]}"
                 ))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -291,20 +315,23 @@ class MarketDashboard:
         sign = "+" if pct >= 0 else ""
         return f"{sign}{pct:.2f}%"
 
-    def _apply_market_data(self, data):
+    def _apply_market_data(self, data, error_msg=None):
         now = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%H:%M:%S")
 
         # 為替
         for name, sym in FX_SYMBOLS.items():
             price, prev_close = data.get(sym, (None, None))
+            lbl, change_lbl = self.fx_labels[name]
             if price is not None:
                 color = self._color_for_change(price, prev_close)
-                lbl, change_lbl = self.fx_labels[name]
                 lbl.config(text=f"{price:.2f}", fg=color)
                 change_lbl.config(
                     text=self._change_text(price, prev_close), fg=color
                 )
                 self.prev_fx[name] = price
+            else:
+                lbl.config(text="N/A", fg=FG_DIM)
+                change_lbl.config(text="")
 
         # プラチナ
         price, prev_close = data.get(PLATINUM_SYMBOL, (None, None))
@@ -315,24 +342,33 @@ class MarketDashboard:
                 text=self._change_text(price, prev_close), fg=color
             )
             self.prev_platinum = price
+        else:
+            self.platinum_label.config(text="N/A", fg=FG_DIM)
+            self.platinum_change_label.config(text="")
 
         # 株価
         for name, sym in STOCK_SYMBOLS.items():
             price, prev_close = data.get(sym, (None, None))
+            lbl, change_lbl = self.stock_labels[name]
             if price is not None:
                 if price >= 10000:
                     text = f"{price:,.0f}"
                 else:
                     text = f"{price:,.2f}"
                 color = self._color_for_change(price, prev_close)
-                lbl, change_lbl = self.stock_labels[name]
                 lbl.config(text=text, fg=color)
                 change_lbl.config(
                     text=self._change_text(price, prev_close), fg=color
                 )
                 self.prev_stocks[name] = price
+            else:
+                lbl.config(text="N/A", fg=FG_DIM)
+                change_lbl.config(text="")
 
-        self.status_label.config(text=f"Updated {now}  |  60s interval")
+        status = f"Updated {now}  |  60s interval"
+        if error_msg:
+            status += f"  |  {error_msg}"
+        self.status_label.config(text=status)
 
     def run(self):
         self.root.mainloop()
