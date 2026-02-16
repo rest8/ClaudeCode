@@ -53,14 +53,6 @@ STOCK_SYMBOLS = {
 FX_PLATINUM_SYMBOLS_LIST = list(FX_SYMBOLS.values()) + [PLATINUM_SYMBOL]
 STOCK_SYMBOLS_LIST = list(STOCK_SYMBOLS.values())
 
-# すべてのシンボル名→ティッカーの逆引き
-ALL_ALERT_SYMBOLS = {}
-for _name, _sym in FX_SYMBOLS.items():
-    ALL_ALERT_SYMBOLS[_name] = _sym
-ALL_ALERT_SYMBOLS["Platinum"] = PLATINUM_SYMBOL
-for _name, _sym in STOCK_SYMBOLS.items():
-    ALL_ALERT_SYMBOLS[_name] = _sym
-
 # --- カラーパレット ---
 BG = "#0f0f1a"
 CARD_BG = "#1a1a2e"
@@ -208,20 +200,45 @@ def fetch_all_market_data(symbols, fast=False):
 
 
 # ============================================================
-# Timer / Alert Popup
+# Pomodoro Timer / Schedule Alert Popup
 # ============================================================
 
+# ポモドーロ設定
+POMO_WORK_MIN = 25
+POMO_BREAK_MIN = 5
+POMO_LONG_BREAK_MIN = 15
+POMO_LONG_BREAK_AFTER = 4   # 4セット後にロングブレイク
+
+# 透過ウィンドウ用の色キー (Linux)
+TRANSPARENT_COLOR = "#f0f0f0"
+
+# スケジュール通知タイミング (秒)
+SCHEDULE_NOTIFY_BEFORE = [600, 300, 120, 30]  # 10m, 5m, 2m, 30s
+SCHEDULE_NOTIFY_LABELS = {600: "10 min", 300: "5 min", 120: "2 min", 30: "30 sec"}
+
+
 class TimerAlertPopup:
-    """タイマー＆プライスアラートのポップアップウィンドウ"""
+    """ポモドーロタイマー＆スケジュールアラートのポップアップ"""
 
     def __init__(self, parent, dashboard):
         self.dashboard = dashboard
         self.win = tk.Toplevel(parent)
         self.win.title("Timer & Alerts")
-        self.win.configure(bg=BG)
         self.win.attributes("-topmost", True)
         self.win.overrideredirect(True)
         self.win.resizable(False, False)
+
+        # 背景を完全透明に
+        self.win.configure(bg=TRANSPARENT_COLOR)
+        try:
+            self.win.attributes("-transparentcolor", TRANSPARENT_COLOR)
+        except tk.TclError:
+            # Linux (X11) では -transparentcolor 非対応の場合がある
+            try:
+                self.win.wait_visibility(self.win)
+                self.win.attributes("-alpha", 0.92)
+            except tk.TclError:
+                pass
 
         # 親ウィンドウの近くに配置
         px = parent.winfo_x() + parent.winfo_width() + 4
@@ -233,16 +250,18 @@ class TimerAlertPopup:
         self.win.bind("<Button-1>", self._on_drag_start)
         self.win.bind("<B1-Motion>", self._on_drag_motion)
 
-        # タイマー状態
-        self._timer_seconds = 0
-        self._timer_running = False
-        self._timer_after_id = None
+        # ポモドーロ状態
+        self._pomo_seconds = POMO_WORK_MIN * 60
+        self._pomo_running = False
+        self._pomo_phase = "work"  # "work" or "break"
+        self._pomo_count = 0       # 完了した作業セッション数
+        self._pomo_after_id = None
 
-        # アラート一覧: [{symbol_name, ticker, condition, threshold, active}]
-        self._alerts = []
-        self._alert_widgets = []
+        # スケジュールアラート: [{title, hour, minute, notified: set()}]
+        self._schedules = []
 
         self._build_ui()
+        self._tick_schedule_check()
 
     def _on_drag_start(self, event):
         self._drag_data["x"] = event.x
@@ -256,15 +275,15 @@ class TimerAlertPopup:
         self.win.geometry(f"+{x}+{y}")
 
     def _build_ui(self):
-        border = tk.Frame(self.win, bg=CARD_BORDER, padx=1, pady=1)
-        border.pack(fill="both", expand=True)
-        main = tk.Frame(border, bg=BG, padx=0, pady=0)
-        main.pack(fill="both", expand=True)
+        main = tk.Frame(self.win, bg=TRANSPARENT_COLOR)
+        main.pack(fill="both", expand=True, padx=0, pady=0)
 
-        # ヘッダー
-        hdr = tk.Frame(main, bg=BG, padx=10, pady=5)
+        # ヘッダー（カード外）
+        hdr_outer = tk.Frame(main, bg=CARD_BORDER, padx=1, pady=1)
+        hdr_outer.pack(fill="x", padx=0, pady=(0, 2))
+        hdr = tk.Frame(hdr_outer, bg=BG, padx=10, pady=5)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="TIMER & ALERTS", font=FONT_SECTION,
+        tk.Label(hdr, text="POMODORO & SCHEDULE", font=FONT_SECTION,
                  bg=BG, fg=ACCENT).pack(side="left")
         close_btn = tk.Label(hdr, text="\u2715", font=FONT_STATUS,
                              bg=BG, fg=CLOSE_FG, cursor="hand2")
@@ -273,79 +292,59 @@ class TimerAlertPopup:
         close_btn.bind("<Enter>", lambda e: close_btn.config(fg=CLOSE_HOVER))
         close_btn.bind("<Leave>", lambda e: close_btn.config(fg=CLOSE_FG))
 
-        tk.Frame(main, bg=ACCENT, height=1).pack(fill="x", padx=6)
+        # --- ポモドーロセクション ---
+        self._build_pomodoro_section(main)
 
-        # --- タイマーセクション ---
-        self._build_timer_section(main)
+        # --- スケジュールアラートセクション ---
+        self._build_schedule_section(main)
 
-        tk.Frame(main, bg=CARD_BORDER, height=1).pack(fill="x", padx=6, pady=2)
-
-        # --- アラートセクション ---
-        self._build_alert_section(main)
-
-    def _build_timer_section(self, parent):
+    # ============================
+    # ポモドーロタイマー
+    # ============================
+    def _build_pomodoro_section(self, parent):
         card_outer = tk.Frame(parent, bg=CARD_BORDER, padx=1, pady=1)
-        card_outer.pack(fill="x", padx=6, pady=3)
+        card_outer.pack(fill="x", padx=0, pady=2)
         card = tk.Frame(card_outer, bg=CARD_BG, padx=10, pady=6)
         card.pack(fill="x")
 
-        tk.Label(card, text="TIMER", font=FONT_SECTION,
-                 bg=CARD_BG, fg=FG_DIM).pack(anchor="w")
+        # フェーズ表示
+        self._phase_label = tk.Label(
+            card, text="WORK", font=FONT_SECTION,
+            bg=CARD_BG, fg=UP_COLOR
+        )
+        self._phase_label.pack(anchor="w")
 
-        # 時間表示
+        # セッションカウント
+        self._count_label = tk.Label(
+            card, text="Session: 0 / 4", font=FONT_STATUS,
+            bg=CARD_BG, fg=FG_DIM
+        )
+        self._count_label.pack(anchor="w")
+
+        # タイマー表示
         self._timer_display = tk.Label(
-            card, text="00:00:00", font=FONT_TIMER_DISPLAY,
+            card, text="25:00", font=FONT_TIMER_DISPLAY,
             bg=CARD_BG, fg=ACCENT
         )
         self._timer_display.pack(pady=(4, 6))
-
-        # プリセットボタン
-        preset_frame = tk.Frame(card, bg=CARD_BG)
-        preset_frame.pack(fill="x", pady=(0, 4))
-        for label, secs in [("1m", 60), ("5m", 300), ("15m", 900), ("30m", 1800), ("1h", 3600)]:
-            btn = tk.Label(
-                preset_frame, text=label, font=FONT_TIMER_BTN,
-                bg=CARD_BORDER, fg=FG, padx=6, pady=1, cursor="hand2"
-            )
-            btn.pack(side="left", padx=2)
-            btn.bind("<Button-1>", lambda e, s=secs: self._set_timer(s))
-            btn.bind("<Enter>", lambda e, b=btn: b.config(bg=FG_DIM))
-            btn.bind("<Leave>", lambda e, b=btn: b.config(bg=CARD_BORDER))
-
-        # カスタム入力行
-        custom_frame = tk.Frame(card, bg=CARD_BG)
-        custom_frame.pack(fill="x", pady=(0, 4))
-        tk.Label(custom_frame, text="Min:", font=FONT_STATUS,
-                 bg=CARD_BG, fg=FG_DIM).pack(side="left")
-        self._custom_min_entry = tk.Entry(
-            custom_frame, width=5, font=FONT_STATUS,
-            bg=CARD_BORDER, fg=FG, insertbackground=FG,
-            relief="flat", bd=2
-        )
-        self._custom_min_entry.pack(side="left", padx=2)
-        set_btn = tk.Label(
-            custom_frame, text="Set", font=FONT_TIMER_BTN,
-            bg=CARD_BORDER, fg=ACCENT, padx=6, pady=1, cursor="hand2"
-        )
-        set_btn.pack(side="left", padx=2)
-        set_btn.bind("<Button-1>", lambda e: self._set_timer_custom())
-        set_btn.bind("<Enter>", lambda e: set_btn.config(bg=FG_DIM))
-        set_btn.bind("<Leave>", lambda e: set_btn.config(bg=CARD_BORDER))
 
         # コントロールボタン
         ctrl_frame = tk.Frame(card, bg=CARD_BG)
         ctrl_frame.pack(fill="x")
 
-        self._start_btn = self._make_ctrl_btn(ctrl_frame, "Start", UP_COLOR, self._start_timer)
+        self._start_btn = self._make_btn(ctrl_frame, "Start", UP_COLOR, self._pomo_start)
         self._start_btn.pack(side="left", padx=2)
 
-        self._pause_btn = self._make_ctrl_btn(ctrl_frame, "Pause", WARN_COLOR, self._pause_timer)
+        self._pause_btn = self._make_btn(ctrl_frame, "Pause", WARN_COLOR, self._pomo_pause)
         self._pause_btn.pack(side="left", padx=2)
 
-        self._reset_btn = self._make_ctrl_btn(ctrl_frame, "Reset", FG_DIM, self._reset_timer)
+        self._skip_btn = self._make_btn(ctrl_frame, "Skip", FG_DIM, self._pomo_skip)
+        self._skip_btn.pack(side="left", padx=2)
+
+        self._reset_btn = self._make_btn(ctrl_frame, "Reset", DOWN_COLOR, self._pomo_reset)
         self._reset_btn.pack(side="left", padx=2)
 
-    def _make_ctrl_btn(self, parent, text, color, command):
+    def _make_btn(self, parent, text, color, command):
         btn = tk.Label(
             parent, text=text, font=FONT_TIMER_BTN,
             bg=CARD_BORDER, fg=color, padx=8, pady=2, cursor="hand2"
@@ -355,174 +354,195 @@ class TimerAlertPopup:
         btn.bind("<Leave>", lambda e: btn.config(bg=CARD_BORDER))
         return btn
 
-    def _set_timer(self, seconds):
-        self._timer_running = False
-        self._timer_seconds = seconds
-        self._update_timer_display()
+    def _pomo_start(self):
+        if not self._pomo_running and self._pomo_seconds > 0:
+            self._pomo_running = True
+            self._tick_pomo()
 
-    def _set_timer_custom(self):
-        try:
-            mins = float(self._custom_min_entry.get())
-            self._set_timer(int(mins * 60))
-        except ValueError:
-            pass
+    def _pomo_pause(self):
+        self._pomo_running = False
 
-    def _start_timer(self):
-        if self._timer_seconds > 0 and not self._timer_running:
-            self._timer_running = True
-            self._tick_timer()
+    def _pomo_skip(self):
+        """現在のフェーズをスキップして次へ"""
+        self._pomo_running = False
+        self._pomo_transition()
 
-    def _pause_timer(self):
-        self._timer_running = False
-
-    def _reset_timer(self):
-        self._timer_running = False
-        self._timer_seconds = 0
-        self._update_timer_display()
+    def _pomo_reset(self):
+        """全リセット"""
+        self._pomo_running = False
+        self._pomo_count = 0
+        self._pomo_phase = "work"
+        self._pomo_seconds = POMO_WORK_MIN * 60
+        self._update_pomo_display()
+        self._phase_label.config(text="WORK", fg=UP_COLOR)
+        self._count_label.config(text="Session: 0 / 4")
         self._timer_display.config(fg=ACCENT)
 
-    def _tick_timer(self):
-        if not self._timer_running:
+    def _tick_pomo(self):
+        if not self._pomo_running:
             return
-        if self._timer_seconds <= 0:
-            self._timer_running = False
-            self._timer_seconds = 0
-            self._update_timer_display()
-            self._on_timer_finished()
+        if self._pomo_seconds <= 0:
+            self._pomo_running = False
+            self._on_pomo_phase_done()
             return
-        self._timer_seconds -= 1
-        self._update_timer_display()
-        # 残り10秒以下で警告色
-        if self._timer_seconds <= 10:
+        self._pomo_seconds -= 1
+        self._update_pomo_display()
+        # 残り10秒で色変え
+        if self._pomo_seconds <= 10:
             self._timer_display.config(fg=DOWN_COLOR)
-        self._timer_after_id = self.win.after(1000, self._tick_timer)
+        self._pomo_after_id = self.win.after(1000, self._tick_pomo)
 
-    def _update_timer_display(self):
-        h = self._timer_seconds // 3600
-        m = (self._timer_seconds % 3600) // 60
-        s = self._timer_seconds % 60
-        self._timer_display.config(text=f"{h:02d}:{m:02d}:{s:02d}")
+    def _update_pomo_display(self):
+        m = self._pomo_seconds // 60
+        s = self._pomo_seconds % 60
+        self._timer_display.config(text=f"{m:02d}:{s:02d}")
 
-    def _on_timer_finished(self):
-        """タイマー完了時のアラート"""
-        self._timer_display.config(fg=DOWN_COLOR)
-        self._flash_timer(0)
+    def _on_pomo_phase_done(self):
+        """フェーズ完了 → 通知して次へ遷移"""
+        if self._pomo_phase == "work":
+            self._pomo_count += 1
+            msg = f"Work session #{self._pomo_count} done!"
+        else:
+            msg = "Break is over. Time to focus!"
+        self._show_notification("POMODORO", msg, ACCENT)
+        self._flash_timer(0, callback=self._pomo_transition)
 
-    def _flash_timer(self, count):
-        """タイマー完了を点滅で通知"""
+    def _pomo_transition(self):
+        """次のフェーズへ遷移"""
+        if self._pomo_phase == "work":
+            # ロングブレイク判定
+            if self._pomo_count % POMO_LONG_BREAK_AFTER == 0:
+                self._pomo_phase = "break"
+                self._pomo_seconds = POMO_LONG_BREAK_MIN * 60
+                self._phase_label.config(text="LONG BREAK", fg=WARN_COLOR)
+            else:
+                self._pomo_phase = "break"
+                self._pomo_seconds = POMO_BREAK_MIN * 60
+                self._phase_label.config(text="BREAK", fg=WARN_COLOR)
+        else:
+            self._pomo_phase = "work"
+            self._pomo_seconds = POMO_WORK_MIN * 60
+            self._phase_label.config(text="WORK", fg=UP_COLOR)
+
+        self._count_label.config(
+            text=f"Session: {self._pomo_count} / {POMO_LONG_BREAK_AFTER}"
+        )
+        self._timer_display.config(fg=ACCENT)
+        self._update_pomo_display()
+
+    def _flash_timer(self, count, callback=None):
+        """タイマー完了点滅"""
         if count >= 10:
             self._timer_display.config(fg=ACCENT)
+            if callback:
+                callback()
             return
-        color = DOWN_COLOR if count % 2 == 0 else BG
+        color = DOWN_COLOR if count % 2 == 0 else CARD_BG
         self._timer_display.config(fg=color)
-        self.win.after(400, lambda: self._flash_timer(count + 1))
+        self.win.after(350, lambda: self._flash_timer(count + 1, callback))
 
-    # --- アラートセクション ---
-    def _build_alert_section(self, parent):
+    # ============================
+    # スケジュールアラート
+    # ============================
+    def _build_schedule_section(self, parent):
         card_outer = tk.Frame(parent, bg=CARD_BORDER, padx=1, pady=1)
-        card_outer.pack(fill="x", padx=6, pady=3)
-        self._alert_card = tk.Frame(card_outer, bg=CARD_BG, padx=10, pady=6)
-        self._alert_card.pack(fill="x")
+        card_outer.pack(fill="x", padx=0, pady=2)
+        self._sched_card = tk.Frame(card_outer, bg=CARD_BG, padx=10, pady=6)
+        self._sched_card.pack(fill="x")
 
-        tk.Label(self._alert_card, text="PRICE ALERTS", font=FONT_SECTION,
+        tk.Label(self._sched_card, text="SCHEDULE ALERTS", font=FONT_SECTION,
                  bg=CARD_BG, fg=FG_DIM).pack(anchor="w", pady=(0, 4))
 
-        # 新規アラート追加行
-        add_frame = tk.Frame(self._alert_card, bg=CARD_BG)
-        add_frame.pack(fill="x", pady=(0, 4))
-
-        # シンボル選択
-        self._alert_symbol_var = tk.StringVar(value=list(ALL_ALERT_SYMBOLS.keys())[0])
-        sym_menu = tk.OptionMenu(add_frame, self._alert_symbol_var,
-                                 *ALL_ALERT_SYMBOLS.keys())
-        sym_menu.config(
-            font=FONT_STATUS, bg=CARD_BORDER, fg=FG,
-            activebackground=FG_DIM, activeforeground=FG,
-            highlightthickness=0, relief="flat", bd=0
-        )
-        sym_menu["menu"].config(
-            bg=CARD_BG, fg=FG, activebackground=FG_DIM,
-            activeforeground=FG, font=FONT_STATUS
-        )
-        sym_menu.pack(side="left")
-
-        # 条件
-        self._alert_cond_var = tk.StringVar(value=">=")
-        cond_menu = tk.OptionMenu(add_frame, self._alert_cond_var, ">=", "<=")
-        cond_menu.config(
-            font=FONT_STATUS, bg=CARD_BORDER, fg=FG,
-            activebackground=FG_DIM, activeforeground=FG,
-            highlightthickness=0, relief="flat", bd=0, width=2
-        )
-        cond_menu["menu"].config(
-            bg=CARD_BG, fg=FG, activebackground=FG_DIM,
-            activeforeground=FG, font=FONT_STATUS
-        )
-        cond_menu.pack(side="left", padx=2)
-
-        # 閾値
-        self._alert_threshold_entry = tk.Entry(
-            add_frame, width=8, font=FONT_STATUS,
+        # 入力行1: 予定名
+        row1 = tk.Frame(self._sched_card, bg=CARD_BG)
+        row1.pack(fill="x", pady=(0, 2))
+        tk.Label(row1, text="Event:", font=FONT_STATUS,
+                 bg=CARD_BG, fg=FG_DIM).pack(side="left")
+        self._sched_title_entry = tk.Entry(
+            row1, width=18, font=FONT_STATUS,
             bg=CARD_BORDER, fg=FG, insertbackground=FG,
             relief="flat", bd=2
         )
-        self._alert_threshold_entry.pack(side="left", padx=2)
+        self._sched_title_entry.pack(side="left", padx=2, fill="x", expand=True)
 
-        # 追加ボタン
-        add_btn = tk.Label(
-            add_frame, text="+Add", font=FONT_TIMER_BTN,
-            bg=CARD_BORDER, fg=ACCENT, padx=6, pady=1, cursor="hand2"
+        # 入力行2: 時刻 (HH:MM)
+        row2 = tk.Frame(self._sched_card, bg=CARD_BG)
+        row2.pack(fill="x", pady=(0, 4))
+        tk.Label(row2, text="Time:", font=FONT_STATUS,
+                 bg=CARD_BG, fg=FG_DIM).pack(side="left")
+        self._sched_hour_entry = tk.Entry(
+            row2, width=3, font=FONT_STATUS,
+            bg=CARD_BORDER, fg=FG, insertbackground=FG,
+            relief="flat", bd=2, justify="center"
         )
-        add_btn.pack(side="left", padx=4)
-        add_btn.bind("<Button-1>", lambda e: self._add_alert())
-        add_btn.bind("<Enter>", lambda e: add_btn.config(bg=FG_DIM))
-        add_btn.bind("<Leave>", lambda e: add_btn.config(bg=CARD_BORDER))
+        self._sched_hour_entry.pack(side="left", padx=2)
+        self._sched_hour_entry.insert(0, "09")
+        tk.Label(row2, text=":", font=FONT_STATUS,
+                 bg=CARD_BG, fg=FG).pack(side="left")
+        self._sched_min_entry = tk.Entry(
+            row2, width=3, font=FONT_STATUS,
+            bg=CARD_BORDER, fg=FG, insertbackground=FG,
+            relief="flat", bd=2, justify="center"
+        )
+        self._sched_min_entry.pack(side="left", padx=2)
+        self._sched_min_entry.insert(0, "00")
 
-        # アラートリスト表示エリア
-        self._alert_list_frame = tk.Frame(self._alert_card, bg=CARD_BG)
-        self._alert_list_frame.pack(fill="x")
+        add_btn = self._make_btn(row2, "+Add", ACCENT, self._add_schedule)
+        add_btn.pack(side="left", padx=6)
 
-    def _add_alert(self):
-        name = self._alert_symbol_var.get()
-        cond = self._alert_cond_var.get()
+        # スケジュール一覧
+        self._sched_list_frame = tk.Frame(self._sched_card, bg=CARD_BG)
+        self._sched_list_frame.pack(fill="x")
+
+    def _add_schedule(self):
+        title = self._sched_title_entry.get().strip()
+        if not title:
+            return
         try:
-            threshold = float(self._alert_threshold_entry.get())
+            hour = int(self._sched_hour_entry.get())
+            minute = int(self._sched_min_entry.get())
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                return
         except ValueError:
             return
 
-        ticker = ALL_ALERT_SYMBOLS[name]
-        alert = {
-            "symbol_name": name,
-            "ticker": ticker,
-            "condition": cond,
-            "threshold": threshold,
-            "active": True,
-        }
-        self._alerts.append(alert)
-        self._render_alert_list()
-        self._alert_threshold_entry.delete(0, tk.END)
+        self._schedules.append({
+            "title": title,
+            "hour": hour,
+            "minute": minute,
+            "notified": set(),  # 通知済みの秒前を記録
+        })
+        self._sched_title_entry.delete(0, tk.END)
+        self._render_schedule_list()
 
-    def _remove_alert(self, idx):
-        if 0 <= idx < len(self._alerts):
-            self._alerts.pop(idx)
-            self._render_alert_list()
+    def _remove_schedule(self, idx):
+        if 0 <= idx < len(self._schedules):
+            self._schedules.pop(idx)
+            self._render_schedule_list()
 
-    def _render_alert_list(self):
-        for w in self._alert_list_frame.winfo_children():
+    def _render_schedule_list(self):
+        for w in self._sched_list_frame.winfo_children():
             w.destroy()
 
-        for i, alert in enumerate(self._alerts):
-            row = tk.Frame(self._alert_list_frame, bg=CARD_BG)
+        now = datetime.now(ZoneInfo("Asia/Tokyo"))
+
+        for i, sched in enumerate(self._schedules):
+            row = tk.Frame(self._sched_list_frame, bg=CARD_BG)
             row.pack(fill="x", pady=1)
 
-            status_color = ACCENT if alert["active"] else FG_DIM
-            cond_text = (
-                f"{alert['symbol_name']} {alert['condition']} "
-                f"{alert['threshold']:,.2f}"
-            )
+            # 完了判定: 全通知済みかつ時間が過ぎている
+            target_min = sched["hour"] * 60 + sched["minute"]
+            now_min = now.hour * 60 + now.minute
+            is_past = now_min > target_min
+            all_notified = len(sched["notified"]) >= len(SCHEDULE_NOTIFY_BEFORE)
+            color = FG_DIM if (is_past and all_notified) else ACCENT
+
+            time_str = f"{sched['hour']:02d}:{sched['minute']:02d}"
+            text = f"{time_str}  {sched['title']}"
+
             tk.Label(
-                row, text=cond_text, font=FONT_STATUS,
-                bg=CARD_BG, fg=status_color, anchor="w"
+                row, text=text, font=FONT_STATUS,
+                bg=CARD_BG, fg=color, anchor="w"
             ).pack(side="left")
 
             del_btn = tk.Label(
@@ -530,67 +550,73 @@ class TimerAlertPopup:
                 bg=CARD_BG, fg=CLOSE_FG, cursor="hand2"
             )
             del_btn.pack(side="right")
-            del_btn.bind("<Button-1>", lambda e, idx=i: self._remove_alert(idx))
+            del_btn.bind("<Button-1>", lambda e, idx=i: self._remove_schedule(idx))
 
-    def check_alerts(self, latest_prices):
-        """最新価格でアラートをチェック（MarketDashboardから呼ばれる）"""
-        for alert in self._alerts:
-            if not alert["active"]:
-                continue
-            price_data = latest_prices.get(alert["ticker"])
-            if price_data is None:
-                continue
-            price = price_data[0] if isinstance(price_data, tuple) else price_data
-            if price is None:
-                continue
+    def _tick_schedule_check(self):
+        """毎秒スケジュールをチェック"""
+        now = datetime.now(ZoneInfo("Asia/Tokyo"))
+        now_total_sec = now.hour * 3600 + now.minute * 60 + now.second
 
-            triggered = False
-            if alert["condition"] == ">=" and price >= alert["threshold"]:
-                triggered = True
-            elif alert["condition"] == "<=" and price <= alert["threshold"]:
-                triggered = True
+        for sched in self._schedules:
+            target_sec = sched["hour"] * 3600 + sched["minute"] * 60
+            diff = target_sec - now_total_sec
 
-            if triggered:
-                alert["active"] = False
-                self._render_alert_list()
-                self._flash_alert_notification(alert, price)
+            for before_sec in SCHEDULE_NOTIFY_BEFORE:
+                if before_sec in sched["notified"]:
+                    continue
+                # diff が before_sec 以下になったら通知 (ただし過ぎすぎは無視)
+                if 0 <= diff <= before_sec and diff <= before_sec:
+                    # before_sec の通知タイミング: diff が before_sec ちょうどか
+                    # 1秒の余裕を持って判定
+                    if abs(diff - before_sec) <= 1 or (diff < before_sec and before_sec not in sched["notified"]):
+                        sched["notified"].add(before_sec)
+                        label = SCHEDULE_NOTIFY_LABELS.get(before_sec, f"{before_sec}s")
+                        self._show_notification(
+                            f"{label} before",
+                            f"{sched['title']}  ({sched['hour']:02d}:{sched['minute']:02d})",
+                            WARN_COLOR
+                        )
+                        self._render_schedule_list()
+                        break  # 1tickにつき1通知
 
-    def _flash_alert_notification(self, alert, price):
-        """アラート発火時の通知"""
+        self.win.after(1000, self._tick_schedule_check)
+
+    # ============================
+    # 通知ポップアップ (共通)
+    # ============================
+    def _show_notification(self, header, message, color):
+        """画面上部にポップアップ通知"""
         notif = tk.Toplevel(self.win)
         notif.overrideredirect(True)
         notif.attributes("-topmost", True)
-        notif.configure(bg=WARN_COLOR)
+        notif.configure(bg=color)
 
-        nx = self.win.winfo_x() + 10
-        ny = self.win.winfo_y() - 50
+        # ウィンドウの上に表示
+        nx = self.win.winfo_x()
+        ny = self.win.winfo_y() - 60
         notif.geometry(f"+{nx}+{ny}")
 
-        frame = tk.Frame(notif, bg=BG, padx=8, pady=4)
+        frame = tk.Frame(notif, bg=BG, padx=10, pady=6)
         frame.pack(padx=2, pady=2)
 
-        msg = (
-            f"{alert['symbol_name']} {alert['condition']} "
-            f"{alert['threshold']:,.2f}  (now: {price:,.2f})"
-        )
         tk.Label(
-            frame, text="ALERT!", font=FONT_SECTION,
-            bg=BG, fg=WARN_COLOR
-        ).pack()
+            frame, text=header, font=FONT_SECTION,
+            bg=BG, fg=color
+        ).pack(anchor="w")
         tk.Label(
-            frame, text=msg, font=FONT_STATUS,
+            frame, text=message, font=FONT_LABEL,
             bg=BG, fg=FG
-        ).pack()
+        ).pack(anchor="w")
 
         dismiss = tk.Label(
-            frame, text="Dismiss", font=FONT_STATUS,
-            bg=CARD_BORDER, fg=ACCENT, padx=6, cursor="hand2"
+            frame, text="OK", font=FONT_TIMER_BTN,
+            bg=CARD_BORDER, fg=ACCENT, padx=8, pady=1, cursor="hand2"
         )
-        dismiss.pack(pady=(4, 0))
+        dismiss.pack(anchor="e", pady=(4, 0))
         dismiss.bind("<Button-1>", lambda e: notif.destroy())
 
-        # 8秒後に自動で閉じる
-        notif.after(8000, lambda: notif.destroy() if notif.winfo_exists() else None)
+        # 10秒後に自動で閉じる
+        notif.after(10000, lambda: notif.destroy() if notif.winfo_exists() else None)
 
     def close(self):
         self.win.destroy()
@@ -627,7 +653,6 @@ class MarketDashboard:
         self.prev_platinum = None
         self._minimized = False
         self._timer_popup = None
-        self._latest_prices = {}
 
         self._build_ui()
         self._update_clocks()
@@ -884,12 +909,6 @@ class MarketDashboard:
         sign = "+" if pct >= 0 else ""
         return f"{sign}{pct:.2f}%"
 
-    def _check_alerts(self, data):
-        """アラートチェックを実行"""
-        self._latest_prices.update(data)
-        if self._timer_popup and self._timer_popup.win.winfo_exists():
-            self._timer_popup.check_alerts(self._latest_prices)
-
     def _apply_fx_data(self, data):
         now = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%H:%M:%S")
 
@@ -916,7 +935,6 @@ class MarketDashboard:
             self.prev_platinum = price
 
         self.status_label.config(text=f"FX {now}  |  1s interval")
-        self._check_alerts(data)
 
     def _apply_stock_data(self, data):
         now = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%H:%M:%S")
@@ -937,7 +955,6 @@ class MarketDashboard:
                 self.prev_stocks[name] = price
 
         self.status_label.config(text=f"Stocks {now}  |  60s interval")
-        self._check_alerts(data)
 
     def run(self):
         self.root.mainloop()
