@@ -8,9 +8,10 @@
     /* ── Reset & Base ── */
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    /* #010101 = color key: this exact color becomes fully transparent + click-through */
     body {
       font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-      background: transparent;
+      background: #010101;
       color: #e0e0e0;
       user-select: none;
       overflow: hidden;
@@ -22,12 +23,9 @@
       height: 100vh;
       display: flex;
       flex-direction: column;
-      border-radius: 16px;
-      background: rgba(15, 15, 20, 0.35);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: #010101;
       overflow: hidden;
+      padding: 8px;
     }
 
     /* ── Title Bar ── */
@@ -35,7 +33,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 14px;
+      padding: 4px 8px;
       flex-shrink: 0;
     }
 
@@ -43,8 +41,9 @@
       font-size: 12px;
       font-weight: 600;
       letter-spacing: 1px;
-      opacity: 0.6;
+      color: rgba(255, 255, 255, 0.7);
       text-transform: uppercase;
+      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9), 0 0 12px rgba(0, 0, 0, 0.7);
     }
 
     #titlebar .controls {
@@ -59,7 +58,7 @@
       border: none;
       cursor: pointer;
       transition: opacity 0.2s;
-      opacity: 0.7;
+      opacity: 0.85;
     }
 
     #titlebar .controls button:hover { opacity: 1; }
@@ -74,29 +73,30 @@
       display: flex;
       justify-content: center;
       gap: 4px;
-      padding: 0 14px 10px;
+      padding: 4px 0 8px;
       flex-shrink: 0;
     }
 
     .tab-btn {
       flex: 1;
-      padding: 8px 0;
+      padding: 7px 0;
       border: none;
       border-radius: 8px;
-      background: rgba(255, 255, 255, 0.04);
-      color: rgba(255, 255, 255, 0.45);
+      background: rgba(30, 30, 40, 0.85);
+      color: rgba(255, 255, 255, 0.5);
       font-size: 12px;
       font-weight: 600;
       letter-spacing: 0.5px;
       cursor: pointer;
       transition: all 0.25s ease;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
     }
 
-    .tab-btn:hover { background: rgba(255, 255, 255, 0.08); }
+    .tab-btn:hover { background: rgba(50, 50, 65, 0.9); }
 
     .tab-btn.active {
-      background: rgba(100, 140, 255, 0.2);
-      color: #7eb4ff;
+      background: rgba(60, 80, 160, 0.85);
+      color: #a0c4ff;
     }
 
     /* ── Panels ── */
@@ -105,12 +105,17 @@
       flex-direction: column;
       align-items: center;
       justify-content: flex-start;
-      padding: 10px 20px 20px;
+      padding: 10px 12px 12px;
       flex: 1;
       overflow-y: auto;
     }
 
     .panel.active { display: flex; }
+
+    /* ── Text shadow for readability over any desktop ── */
+    .text-glow {
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.95), 0 0 20px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 0, 0, 0.5);
+    }
 
     /* ── Clock ── */
     #clock-time {
@@ -119,21 +124,24 @@
       letter-spacing: 2px;
       margin-top: 20px;
       font-variant-numeric: tabular-nums;
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.95), 0 0 30px rgba(0, 0, 0, 0.8);
     }
 
     #clock-seconds {
       font-size: 22px;
       font-weight: 300;
-      opacity: 0.45;
+      opacity: 0.55;
       margin-top: -4px;
       font-variant-numeric: tabular-nums;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
     }
 
     #clock-date {
       font-size: 14px;
-      opacity: 0.4;
+      opacity: 0.5;
       margin-top: 12px;
       font-weight: 400;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
     }
 
     /* ── Timer ── */
@@ -143,14 +151,16 @@
       letter-spacing: 2px;
       margin: 16px 0 8px;
       font-variant-numeric: tabular-nums;
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.95), 0 0 30px rgba(0, 0, 0, 0.8);
     }
 
     .timer-label {
       font-size: 11px;
-      opacity: 0.35;
+      opacity: 0.45;
       letter-spacing: 2px;
       text-transform: uppercase;
       margin-bottom: 20px;
+      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
     }
 
     .timer-presets {
@@ -164,8 +174,8 @@
     .preset-btn {
       padding: 6px 14px;
       border-radius: 20px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(100, 140, 255, 0.25);
+      background: rgba(30, 30, 50, 0.85);
       color: #bbb;
       font-size: 12px;
       cursor: pointer;
@@ -173,8 +183,8 @@
     }
 
     .preset-btn:hover {
-      background: rgba(100, 140, 255, 0.15);
-      border-color: rgba(100, 140, 255, 0.3);
+      background: rgba(60, 80, 160, 0.85);
+      border-color: rgba(100, 140, 255, 0.5);
       color: #7eb4ff;
     }
 
@@ -189,8 +199,8 @@
       width: 52px;
       padding: 6px;
       border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(30, 30, 40, 0.9);
       color: #e0e0e0;
       font-size: 16px;
       text-align: center;
@@ -199,12 +209,13 @@
     }
 
     .timer-inputs input:focus {
-      border-color: rgba(100, 140, 255, 0.5);
+      border-color: rgba(100, 140, 255, 0.6);
     }
 
     .timer-inputs span {
       font-size: 13px;
-      opacity: 0.4;
+      opacity: 0.5;
+      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
     }
 
     .timer-controls {
@@ -224,25 +235,25 @@
     }
 
     .btn-start {
-      background: rgba(76, 217, 100, 0.2);
+      background: rgba(30, 80, 40, 0.9);
       color: #4cd964;
     }
 
-    .btn-start:hover { background: rgba(76, 217, 100, 0.3); }
+    .btn-start:hover { background: rgba(40, 100, 50, 0.95); }
 
     .btn-pause {
-      background: rgba(255, 204, 0, 0.2);
+      background: rgba(80, 65, 10, 0.9);
       color: #ffcc00;
     }
 
-    .btn-pause:hover { background: rgba(255, 204, 0, 0.3); }
+    .btn-pause:hover { background: rgba(100, 80, 15, 0.95); }
 
     .btn-reset {
-      background: rgba(255, 59, 48, 0.15);
+      background: rgba(80, 25, 25, 0.9);
       color: #ff6b6b;
     }
 
-    .btn-reset:hover { background: rgba(255, 59, 48, 0.25); }
+    .btn-reset:hover { background: rgba(100, 30, 30, 0.95); }
 
     /* ── Alert / Alarms ── */
     .alert-list {
@@ -261,8 +272,8 @@
       justify-content: space-between;
       padding: 10px 14px;
       border-radius: 10px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(30, 30, 40, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
     .alert-item .alert-time {
@@ -297,7 +308,7 @@
       position: absolute;
       inset: 0;
       border-radius: 20px;
-      background: rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.15);
       transition: background 0.3s;
     }
 
@@ -314,7 +325,7 @@
     }
 
     .toggle input:checked + .slider {
-      background: rgba(76, 217, 100, 0.35);
+      background: rgba(76, 217, 100, 0.45);
     }
 
     .toggle input:checked + .slider::before {
@@ -347,37 +358,37 @@
       flex: 0 0 auto;
       padding: 8px 10px;
       border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(30, 30, 40, 0.9);
       color: #e0e0e0;
       font-size: 15px;
       outline: none;
     }
 
     .add-alert-row input[type="time"]:focus {
-      border-color: rgba(100, 140, 255, 0.5);
+      border-color: rgba(100, 140, 255, 0.6);
     }
 
     .add-alert-row input[type="text"] {
       flex: 1;
       padding: 8px 10px;
       border-radius: 8px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(30, 30, 40, 0.9);
       color: #e0e0e0;
       font-size: 13px;
       outline: none;
     }
 
     .add-alert-row input[type="text"]:focus {
-      border-color: rgba(100, 140, 255, 0.5);
+      border-color: rgba(100, 140, 255, 0.6);
     }
 
     .btn-add {
       padding: 8px 18px;
       border-radius: 8px;
       border: none;
-      background: rgba(100, 140, 255, 0.2);
+      background: rgba(60, 80, 160, 0.85);
       color: #7eb4ff;
       font-size: 13px;
       font-weight: 600;
@@ -386,15 +397,14 @@
       transition: background 0.2s;
     }
 
-    .btn-add:hover { background: rgba(100, 140, 255, 0.35); }
+    .btn-add:hover { background: rgba(70, 95, 190, 0.95); }
 
     /* ── Notification Overlay ── */
     #notification-overlay {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(255, 59, 48, 0.12);
-      backdrop-filter: blur(6px);
+      background: rgba(180, 40, 30, 0.92);
       z-index: 1000;
       align-items: center;
       justify-content: center;
@@ -415,7 +425,7 @@
 
     #notification-overlay .notif-sub {
       font-size: 13px;
-      opacity: 0.6;
+      opacity: 0.7;
       color: #fff;
     }
 
@@ -423,7 +433,7 @@
       padding: 10px 32px;
       border-radius: 24px;
       border: none;
-      background: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.25);
       color: #fff;
       font-size: 14px;
       font-weight: 600;
@@ -431,17 +441,17 @@
       margin-top: 8px;
     }
 
-    .btn-dismiss:hover { background: rgba(255, 255, 255, 0.3); }
+    .btn-dismiss:hover { background: rgba(255, 255, 255, 0.4); }
 
     @keyframes pulseOverlay {
-      from { background: rgba(255, 59, 48, 0.10); }
-      to { background: rgba(255, 59, 48, 0.22); }
+      from { background: rgba(180, 40, 30, 0.88); }
+      to { background: rgba(200, 50, 40, 0.95); }
     }
 
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
 
     /* ── Progress ring for timer ── */
     .timer-ring-wrap {
@@ -455,7 +465,7 @@
 
     .timer-ring-bg {
       fill: none;
-      stroke: rgba(255, 255, 255, 0.06);
+      stroke: rgba(255, 255, 255, 0.1);
       stroke-width: 4;
     }
 
@@ -465,6 +475,7 @@
       stroke-width: 4;
       stroke-linecap: round;
       transition: stroke-dashoffset 0.5s linear;
+      filter: drop-shadow(0 0 6px rgba(126, 180, 255, 0.5));
     }
 
     .timer-ring-text {
@@ -481,7 +492,7 @@
 
 <div id="app">
   <!-- Title bar -->
-  <div id="titlebar">
+  <div id="titlebar" class="pywebview-drag-region">
     <span class="title">Time Manager</span>
     <div class="controls">
       <button class="btn-pin" id="pinBtn" title="Always on top"></button>
