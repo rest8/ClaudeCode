@@ -110,10 +110,9 @@ FONT_ICON = ("Segoe UI", 9)
 # ============================================================
 
 def _fetch_via_yf_download(symbols):
-    """方法1: yf.download() で一括取得（最も安定）"""
+    """方法1: yf.download() で現在値を一括取得 + fast_info で前日終値"""
     import yfinance as yf
-    df = yf.download(symbols, period="5d", group_by="ticker", progress=False,
-                     threads=True, auto_adjust=False)
+    df = yf.download(symbols, period="5d", group_by="ticker", progress=False, threads=True)
     data = {}
     for sym in symbols:
         try:
@@ -123,7 +122,12 @@ def _fetch_via_yf_download(symbols):
                 close_series = df[sym]["Close"].dropna()
             if len(close_series) >= 1:
                 price = float(close_series.iloc[-1])
-                prev = float(close_series.iloc[-2]) if len(close_series) >= 2 else None
+                # 前日終値は fast_info から取得 (配当・分割調整の影響を受けない)
+                prev = None
+                try:
+                    prev = float(yf.Ticker(sym).fast_info["previous_close"])
+                except Exception:
+                    pass
                 data[sym] = (price, prev)
         except Exception as e:
             logging.debug("yf.download parse error for %s: %s", sym, e)
@@ -131,18 +135,21 @@ def _fetch_via_yf_download(symbols):
 
 
 def _fetch_via_yf_ticker(symbols):
-    """方法2: yf.Ticker().history() で個別取得"""
+    """方法2: yf.Ticker().fast_info で個別取得"""
     import yfinance as yf
     data = {}
     for sym in symbols:
         try:
-            hist = yf.Ticker(sym).history(period="5d", auto_adjust=False)
-            if hist is not None and len(hist) >= 1:
-                price = float(hist["Close"].iloc[-1])
-                prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else None
-                data[sym] = (price, prev)
+            info = yf.Ticker(sym).fast_info
+            price = float(info["last_price"])
+            prev = None
+            try:
+                prev = float(info["previous_close"])
+            except Exception:
+                pass
+            data[sym] = (price, prev)
         except Exception as e:
-            logging.debug("yf.Ticker history error for %s: %s", sym, e)
+            logging.debug("yf.Ticker fast_info error for %s: %s", sym, e)
     return data
 
 
