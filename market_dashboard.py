@@ -203,13 +203,14 @@ def fetch_all_market_data(symbols, fast=False):
                 logging.debug("yf.Ticker fallback failed: %s", e)
         return data
 
-    # 通常更新: yf.download() → yf.Ticker → HTTP
+    # 通常更新: HTTP → yf.Ticker → yf.download()
+    # HTTP の chartPreviousClose が最も正確な前日終値を返すため最優先
     try:
-        logging.info("Trying yf.download()...")
-        data = _fetch_via_yf_download(symbols)
-        logging.info("yf.download() got %d/%d symbols", len(data), len(symbols))
+        logging.info("Trying HTTP fetch...")
+        data = _fetch_via_http(symbols)
+        logging.info("HTTP fetch got %d/%d symbols", len(data), len(symbols))
     except Exception as e:
-        logging.warning("yf.download() failed: %s", e)
+        logging.warning("HTTP fetch failed: %s", e)
 
     missing = [s for s in symbols if s not in data]
     if missing:
@@ -222,10 +223,10 @@ def fetch_all_market_data(symbols, fast=False):
     missing = [s for s in symbols if s not in data]
     if missing:
         try:
-            extra = _fetch_via_http(missing)
+            extra = _fetch_via_yf_download(missing)
             data.update(extra)
         except Exception as e:
-            logging.warning("HTTP fetch failed: %s", e)
+            logging.warning("yf.download() failed: %s", e)
 
     return data
 
