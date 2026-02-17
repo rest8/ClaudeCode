@@ -69,6 +69,24 @@ CLOSE_FG = "#ff5555"
 CLOSE_HOVER = "#ff8888"
 WARN_COLOR = "#ffab40"
 
+# iOS Timer 用カラー
+IOS_BG = "#000000"
+IOS_CARD = "#1c1c1e"
+IOS_RING_BG = "#2c2c2e"
+IOS_RING_FG = "#ff9f0a"       # オレンジ (iOS Timer風)
+IOS_RING_WORK = "#30d158"     # グリーン (作業中)
+IOS_RING_BREAK = "#ff9f0a"    # オレンジ (休憩中)
+IOS_GREEN_BTN = "#30d158"
+IOS_GREEN_BTN_BG = "#0a3a1a"
+IOS_RED_BTN = "#ff453a"
+IOS_RED_BTN_BG = "#3a1a1a"
+IOS_GRAY_BTN = "#8e8e93"
+IOS_GRAY_BTN_BG = "#2c2c2e"
+IOS_TEXT = "#ffffff"
+IOS_TEXT_DIM = "#8e8e93"
+IOS_PICKER_BG = "#1c1c1e"
+IOS_PICKER_SEL = "#2c2c2e"
+
 # --- フォント ---
 FONT_TITLE = ("Segoe UI", 10, "bold")
 FONT_SECTION = ("Segoe UI", 8, "bold")
@@ -78,7 +96,12 @@ FONT_VALUE_BOLD = ("Consolas", 9, "bold")
 FONT_STATUS = ("Segoe UI", 7)
 FONT_CLOSE = ("Segoe UI", 9)
 FONT_TIMER_DISPLAY = ("Consolas", 18, "bold")
+FONT_TIMER_LARGE = ("Consolas", 28, "bold")
 FONT_TIMER_BTN = ("Segoe UI", 8)
+FONT_TIMER_BTN_LG = ("Segoe UI", 9, "bold")
+FONT_PICKER = ("Consolas", 13)
+FONT_PICKER_DIM = ("Consolas", 11)
+FONT_PICKER_LABEL = ("Segoe UI", 8)
 FONT_ICON = ("Segoe UI", 9)
 
 
@@ -217,8 +240,154 @@ SCHEDULE_NOTIFY_BEFORE = [600, 300, 120, 30]  # 10m, 5m, 2m, 30s
 SCHEDULE_NOTIFY_LABELS = {600: "10 min", 300: "5 min", 120: "2 min", 30: "30 sec"}
 
 
+class iOSScrollPicker(tk.Canvas):
+    """iOS風スクロールホイールピッカー (Canvas実装)"""
+
+    def __init__(self, parent, values, initial=0, width=60, height=150,
+                 label="", on_change=None, **kwargs):
+        super().__init__(parent, width=width, height=height,
+                         bg=IOS_BG, highlightthickness=0, **kwargs)
+        self._values = values
+        self._selected = initial  # 選択中のインデックス
+        self._item_h = 36        # 各アイテムの高さ
+        self._visible = 5        # 表示行数 (奇数)
+        self._label = label
+        self._on_change = on_change
+        self._scroll_y = 0.0     # スクロールオフセット (アニメーション用)
+        self._target_y = 0.0
+        self._velocity = 0.0
+        self._dragging = False
+        self._last_y = 0
+        self._anim_id = None
+
+        self.bind("<Button-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_drag)
+        self.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<MouseWheel>", self._on_mousewheel)
+        self.bind("<Button-4>", lambda e: self._scroll_step(-1))
+        self.bind("<Button-5>", lambda e: self._scroll_step(1))
+
+        self._draw()
+
+    @property
+    def value(self):
+        return self._values[self._selected]
+
+    def set_index(self, idx):
+        self._selected = max(0, min(idx, len(self._values) - 1))
+        self._scroll_y = 0.0
+        self._draw()
+
+    def _on_press(self, event):
+        self._dragging = True
+        self._last_y = event.y
+        self._velocity = 0.0
+        if self._anim_id:
+            self.after_cancel(self._anim_id)
+            self._anim_id = None
+
+    def _on_drag(self, event):
+        if not self._dragging:
+            return
+        dy = event.y - self._last_y
+        self._velocity = dy
+        self._scroll_y += dy
+        self._last_y = event.y
+        self._draw()
+
+    def _on_release(self, event):
+        self._dragging = False
+        # スクロール量からインデックス変更を計算
+        idx_delta = round(-self._scroll_y / self._item_h)
+        new_idx = self._selected + idx_delta
+        new_idx = max(0, min(new_idx, len(self._values) - 1))
+        self._selected = new_idx
+        self._scroll_y = 0.0
+        self._draw()
+        if self._on_change:
+            self._on_change(self._values[self._selected])
+
+    def _on_mousewheel(self, event):
+        delta = -1 if event.delta > 0 else 1
+        self._scroll_step(delta)
+
+    def _scroll_step(self, direction):
+        new_idx = self._selected + direction
+        new_idx = max(0, min(new_idx, len(self._values) - 1))
+        if new_idx != self._selected:
+            self._selected = new_idx
+            self._draw()
+            if self._on_change:
+                self._on_change(self._values[self._selected])
+
+    def _draw(self):
+        self.delete("all")
+        w = int(self.cget("width"))
+        h = int(self.cget("height"))
+        center_y = h / 2
+
+        # 選択行のハイライト帯
+        sel_top = center_y - self._item_h / 2
+        sel_bot = center_y + self._item_h / 2
+        self.create_rectangle(0, sel_top, w, sel_bot,
+                              fill=IOS_PICKER_SEL, outline="")
+        # 上下のセパレータライン
+        self.create_line(0, sel_top, w, sel_top, fill=IOS_GRAY_BTN, width=1)
+        self.create_line(0, sel_bot, w, sel_bot, fill=IOS_GRAY_BTN, width=1)
+
+        # 各アイテムを描画
+        half = self._visible // 2
+        for offset in range(-half, half + 1):
+            idx = self._selected + offset
+            if idx < 0 or idx >= len(self._values):
+                continue
+            y = center_y + offset * self._item_h + self._scroll_y
+            # 中心からの距離で透明度を変える
+            dist = abs(y - center_y)
+            max_dist = (half + 1) * self._item_h
+            if dist > max_dist:
+                continue
+
+            # フォントサイズと色を距離で変える
+            if dist < self._item_h * 0.6:
+                font = FONT_PICKER
+                color = IOS_TEXT
+            else:
+                font = FONT_PICKER_DIM
+                ratio = min(dist / max_dist, 1.0)
+                # 白→灰色にフェード
+                gray = int(255 * (1 - ratio * 0.7))
+                color = f"#{gray:02x}{gray:02x}{gray:02x}"
+
+            text = str(self._values[idx])
+            self.create_text(w / 2, y, text=text, font=font,
+                             fill=color, anchor="center")
+
+        # ラベル (min / sec)
+        if self._label:
+            self.create_text(w - 4, center_y, text=self._label,
+                             font=FONT_PICKER_LABEL, fill=IOS_TEXT_DIM,
+                             anchor="e")
+
+        # 上下グラデーション (フェード効果)
+        for i in range(20):
+            ratio = i / 20
+            alpha_hex = int(255 * (1 - ratio))
+            grad_color = f"#{0:02x}{0:02x}{0:02x}"
+            self.create_rectangle(0, i * 4, w, (i + 1) * 4,
+                                  fill=IOS_BG, outline="",
+                                  stipple="gray50" if ratio < 0.5 else "")
+            self.create_rectangle(0, h - (i + 1) * 4, w, h - i * 4,
+                                  fill=IOS_BG, outline="",
+                                  stipple="gray50" if ratio < 0.5 else "")
+
+
 class TimerAlertPopup:
-    """ポモドーロタイマー＆スケジュールアラートのポップアップ"""
+    """iOS風タイマー＆スケジュールアラートのポップアップ"""
+
+    # 円形プログレスリングのサイズ
+    RING_SIZE = 180
+    RING_WIDTH = 8
 
     def __init__(self, parent, dashboard):
         self.dashboard = dashboard
@@ -233,10 +402,9 @@ class TimerAlertPopup:
         try:
             self.win.attributes("-transparentcolor", TRANSPARENT_COLOR)
         except tk.TclError:
-            # Linux (X11) では -transparentcolor 非対応の場合がある
             try:
                 self.win.wait_visibility(self.win)
-                self.win.attributes("-alpha", 0.92)
+                self.win.attributes("-alpha", 0.95)
             except tk.TclError:
                 pass
 
@@ -250,14 +418,20 @@ class TimerAlertPopup:
         self.win.bind("<Button-1>", self._on_drag_start)
         self.win.bind("<B1-Motion>", self._on_drag_motion)
 
-        # ポモドーロ状態
-        self._pomo_seconds = POMO_WORK_MIN * 60
-        self._pomo_running = False
-        self._pomo_phase = "work"  # "work" or "break"
-        self._pomo_count = 0       # 完了した作業セッション数
-        self._pomo_after_id = None
+        # タイマー状態
+        self._total_seconds = POMO_WORK_MIN * 60  # 設定された合計秒数
+        self._remaining = self._total_seconds
+        self._running = False
+        self._pomo_phase = "work"
+        self._pomo_count = 0
+        self._after_id = None
+        self._state = "picker"  # "picker" (時間選択) or "timer" (カウントダウン)
 
-        # スケジュールアラート: [{title, hour, minute, notified: set()}]
+        # ピッカーの現在値
+        self._picker_min = POMO_WORK_MIN
+        self._picker_sec = 0
+
+        # スケジュールアラート
         self._schedules = []
 
         self._build_ui()
@@ -276,73 +450,234 @@ class TimerAlertPopup:
 
     def _build_ui(self):
         main = tk.Frame(self.win, bg=TRANSPARENT_COLOR)
-        main.pack(fill="both", expand=True, padx=0, pady=0)
+        main.pack(fill="both", expand=True)
 
-        # ヘッダー（カード外）
+        # ヘッダー
         hdr_outer = tk.Frame(main, bg=CARD_BORDER, padx=1, pady=1)
-        hdr_outer.pack(fill="x", padx=0, pady=(0, 2))
-        hdr = tk.Frame(hdr_outer, bg=BG, padx=10, pady=5)
+        hdr_outer.pack(fill="x", pady=(0, 0))
+        hdr = tk.Frame(hdr_outer, bg=IOS_BG, padx=10, pady=6)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="POMODORO & SCHEDULE", font=FONT_SECTION,
-                 bg=BG, fg=ACCENT).pack(side="left")
+        tk.Label(hdr, text="TIMER", font=FONT_SECTION,
+                 bg=IOS_BG, fg=IOS_TEXT).pack(side="left")
+
+        # フェーズ・セッション表示
+        self._phase_label = tk.Label(
+            hdr, text="", font=FONT_STATUS,
+            bg=IOS_BG, fg=IOS_GREEN_BTN
+        )
+        self._phase_label.pack(side="left", padx=(8, 0))
+
         close_btn = tk.Label(hdr, text="\u2715", font=FONT_STATUS,
-                             bg=BG, fg=CLOSE_FG, cursor="hand2")
+                             bg=IOS_BG, fg=IOS_RED_BTN, cursor="hand2")
         close_btn.pack(side="right")
         close_btn.bind("<Button-1>", lambda e: self.close())
         close_btn.bind("<Enter>", lambda e: close_btn.config(fg=CLOSE_HOVER))
-        close_btn.bind("<Leave>", lambda e: close_btn.config(fg=CLOSE_FG))
+        close_btn.bind("<Leave>", lambda e: close_btn.config(fg=IOS_RED_BTN))
 
-        # --- ポモドーロセクション ---
-        self._build_pomodoro_section(main)
+        # メインカード
+        card_outer = tk.Frame(main, bg=CARD_BORDER, padx=1, pady=1)
+        card_outer.pack(fill="x", pady=0)
+        self._card = tk.Frame(card_outer, bg=IOS_BG, padx=12, pady=10)
+        self._card.pack(fill="x")
 
-        # --- スケジュールアラートセクション ---
+        # コンテナ: ピッカー or タイマーリング (切り替え用)
+        self._display_frame = tk.Frame(self._card, bg=IOS_BG)
+        self._display_frame.pack(fill="x")
+
+        # ボタンフレーム
+        self._btn_frame = tk.Frame(self._card, bg=IOS_BG)
+        self._btn_frame.pack(fill="x", pady=(10, 4))
+
+        # 初期表示: ピッカー
+        self._show_picker()
+
+        # スケジュールセクション
         self._build_schedule_section(main)
 
     # ============================
-    # ポモドーロタイマー
+    # iOS風ピッカー表示
     # ============================
-    def _build_pomodoro_section(self, parent):
-        card_outer = tk.Frame(parent, bg=CARD_BORDER, padx=1, pady=1)
-        card_outer.pack(fill="x", padx=0, pady=2)
-        card = tk.Frame(card_outer, bg=CARD_BG, padx=10, pady=6)
-        card.pack(fill="x")
+    def _show_picker(self):
+        self._state = "picker"
+        for w in self._display_frame.winfo_children():
+            w.destroy()
+        for w in self._btn_frame.winfo_children():
+            w.destroy()
 
-        # フェーズ表示
-        self._phase_label = tk.Label(
-            card, text="WORK", font=FONT_SECTION,
-            bg=CARD_BG, fg=UP_COLOR
+        # ピッカーコンテナ
+        picker_frame = tk.Frame(self._display_frame, bg=IOS_BG)
+        picker_frame.pack(pady=(6, 0))
+
+        # 分ピッカー
+        min_values = list(range(0, 100))
+        self._min_picker = iOSScrollPicker(
+            picker_frame, min_values, initial=self._picker_min,
+            width=70, height=150, label="min",
+            on_change=self._on_min_change
         )
-        self._phase_label.pack(anchor="w")
+        self._min_picker.pack(side="left", padx=(10, 0))
 
-        # セッションカウント
+        # コロン
+        tk.Label(picker_frame, text=":", font=FONT_TIMER_LARGE,
+                 bg=IOS_BG, fg=IOS_TEXT).pack(side="left", padx=2)
+
+        # 秒ピッカー
+        sec_values = list(range(0, 60))
+        self._sec_picker = iOSScrollPicker(
+            picker_frame, sec_values, initial=self._picker_sec,
+            width=70, height=150, label="sec",
+            on_change=self._on_sec_change
+        )
+        self._sec_picker.pack(side="left", padx=(0, 10))
+
+        # プリセットボタン
+        preset_frame = tk.Frame(self._display_frame, bg=IOS_BG)
+        preset_frame.pack(fill="x", pady=(8, 0))
+
+        presets = [("5m", 5, 0), ("15m", 15, 0), ("25m", 25, 0),
+                   ("45m", 45, 0), ("60m", 60, 0), ("90m", 90, 0)]
+        for label, m, s in presets:
+            btn = tk.Label(
+                preset_frame, text=label, font=FONT_STATUS,
+                bg=IOS_GRAY_BTN_BG, fg=IOS_RING_FG,
+                padx=8, pady=3, cursor="hand2"
+            )
+            btn.pack(side="left", padx=2)
+            btn.bind("<Button-1>", lambda e, mm=m, ss=s: self._set_preset(mm, ss))
+            btn.bind("<Enter>", lambda e, b=btn: b.config(bg=IOS_PICKER_SEL))
+            btn.bind("<Leave>", lambda e, b=btn: b.config(bg=IOS_GRAY_BTN_BG))
+
+        # 開始ボタン (iOS風丸ボタン)
+        self._make_ios_round_btn(
+            self._btn_frame, "Start", IOS_GREEN_BTN, IOS_GREEN_BTN_BG,
+            self._start_timer
+        ).pack(side="right", padx=4)
+
+    def _on_min_change(self, val):
+        self._picker_min = val
+
+    def _on_sec_change(self, val):
+        self._picker_sec = val
+
+    def _set_preset(self, m, s):
+        self._picker_min = m
+        self._picker_sec = s
+        self._min_picker.set_index(m)
+        self._sec_picker.set_index(s)
+
+    # ============================
+    # iOS風タイマーリング表示
+    # ============================
+    def _show_timer(self):
+        self._state = "timer"
+        for w in self._display_frame.winfo_children():
+            w.destroy()
+        for w in self._btn_frame.winfo_children():
+            w.destroy()
+
+        size = self.RING_SIZE
+
+        # Canvas でリング描画
+        self._ring_canvas = tk.Canvas(
+            self._display_frame, width=size, height=size,
+            bg=IOS_BG, highlightthickness=0
+        )
+        self._ring_canvas.pack(pady=(8, 4))
+
+        # セッション表示
         self._count_label = tk.Label(
-            card, text="Session: 0 / 4", font=FONT_STATUS,
-            bg=CARD_BG, fg=FG_DIM
+            self._display_frame, text=self._session_text(),
+            font=FONT_STATUS, bg=IOS_BG, fg=IOS_TEXT_DIM
         )
-        self._count_label.pack(anchor="w")
+        self._count_label.pack()
 
-        # タイマー表示
-        self._timer_display = tk.Label(
-            card, text="25:00", font=FONT_TIMER_DISPLAY,
-            bg=CARD_BG, fg=ACCENT
+        # ボタン: Cancel (左) / Pause・Resume (右)
+        self._cancel_btn = self._make_ios_round_btn(
+            self._btn_frame, "Cancel", IOS_RED_BTN, IOS_RED_BTN_BG,
+            self._cancel_timer
         )
-        self._timer_display.pack(pady=(4, 6))
+        self._cancel_btn.pack(side="left", padx=4)
 
-        # コントロールボタン
-        ctrl_frame = tk.Frame(card, bg=CARD_BG)
-        ctrl_frame.pack(fill="x")
+        self._pause_resume_btn = self._make_ios_round_btn(
+            self._btn_frame, "Pause", IOS_RING_FG, IOS_GRAY_BTN_BG,
+            self._toggle_pause
+        )
+        self._pause_resume_btn.pack(side="right", padx=4)
 
-        self._start_btn = self._make_btn(ctrl_frame, "Start", UP_COLOR, self._pomo_start)
-        self._start_btn.pack(side="left", padx=2)
+        self._draw_ring()
 
-        self._pause_btn = self._make_btn(ctrl_frame, "Pause", WARN_COLOR, self._pomo_pause)
-        self._pause_btn.pack(side="left", padx=2)
+    def _session_text(self):
+        phase = "WORK" if self._pomo_phase == "work" else "BREAK"
+        return f"{phase}  |  Session {self._pomo_count} / {POMO_LONG_BREAK_AFTER}"
 
-        self._skip_btn = self._make_btn(ctrl_frame, "Skip", FG_DIM, self._pomo_skip)
-        self._skip_btn.pack(side="left", padx=2)
+    def _draw_ring(self):
+        canvas = self._ring_canvas
+        canvas.delete("all")
+        size = self.RING_SIZE
+        pad = 14
+        lw = self.RING_WIDTH
 
-        self._reset_btn = self._make_btn(ctrl_frame, "Reset", DOWN_COLOR, self._pomo_reset)
-        self._reset_btn.pack(side="left", padx=2)
+        # 背景リング
+        canvas.create_oval(
+            pad, pad, size - pad, size - pad,
+            outline=IOS_RING_BG, width=lw, style="arc",
+            start=90, extent=-360
+        )
+
+        # プログレスリング
+        if self._total_seconds > 0:
+            progress = self._remaining / self._total_seconds
+        else:
+            progress = 0
+        extent = -360 * progress
+        ring_color = IOS_RING_WORK if self._pomo_phase == "work" else IOS_RING_BREAK
+        canvas.create_arc(
+            pad, pad, size - pad, size - pad,
+            outline=ring_color, width=lw, style="arc",
+            start=90, extent=extent
+        )
+
+        # 中央のタイマーテキスト
+        m = self._remaining // 60
+        s = self._remaining % 60
+        time_text = f"{m:02d}:{s:02d}"
+        canvas.create_text(
+            size / 2, size / 2 - 6,
+            text=time_text, font=FONT_TIMER_LARGE,
+            fill=IOS_TEXT
+        )
+        # 残り時間の小さいラベル
+        if self._remaining <= 10 and self._running:
+            canvas.create_text(
+                size / 2, size / 2 + 22,
+                text="finishing...", font=FONT_STATUS,
+                fill=IOS_RED_BTN
+            )
+
+    # ============================
+    # iOS風丸ボタン
+    # ============================
+    def _make_ios_round_btn(self, parent, text, fg_color, bg_color, command):
+        btn = tk.Label(
+            parent, text=text, font=FONT_TIMER_BTN_LG,
+            bg=bg_color, fg=fg_color,
+            padx=16, pady=6, cursor="hand2"
+        )
+        btn.bind("<Button-1>", lambda e: command())
+        btn.bind("<Enter>", lambda e: btn.config(
+            bg=self._lighten(bg_color, 0.15)
+        ))
+        btn.bind("<Leave>", lambda e: btn.config(bg=bg_color))
+        return btn
+
+    def _lighten(self, hex_color, amount):
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        r = min(255, int(r + (255 - r) * amount))
+        g = min(255, int(g + (255 - g) * amount))
+        b = min(255, int(b + (255 - b) * amount))
+        return f"#{r:02x}{g:02x}{b:02x}"
 
     def _make_btn(self, parent, text, color, command):
         btn = tk.Label(
@@ -354,144 +689,148 @@ class TimerAlertPopup:
         btn.bind("<Leave>", lambda e: btn.config(bg=CARD_BORDER))
         return btn
 
-    def _pomo_start(self):
-        if not self._pomo_running and self._pomo_seconds > 0:
-            self._pomo_running = True
-            self._tick_pomo()
-
-    def _pomo_pause(self):
-        self._pomo_running = False
-
-    def _pomo_skip(self):
-        """現在のフェーズをスキップして次へ"""
-        self._pomo_running = False
-        self._pomo_transition()
-
-    def _pomo_reset(self):
-        """全リセット"""
-        self._pomo_running = False
-        self._pomo_count = 0
-        self._pomo_phase = "work"
-        self._pomo_seconds = POMO_WORK_MIN * 60
-        self._update_pomo_display()
-        self._phase_label.config(text="WORK", fg=UP_COLOR)
-        self._count_label.config(text="Session: 0 / 4")
-        self._timer_display.config(fg=ACCENT)
-
-    def _tick_pomo(self):
-        if not self._pomo_running:
+    # ============================
+    # タイマーコントロール
+    # ============================
+    def _start_timer(self):
+        total = self._picker_min * 60 + self._picker_sec
+        if total <= 0:
             return
-        if self._pomo_seconds <= 0:
-            self._pomo_running = False
-            self._on_pomo_phase_done()
+        self._total_seconds = total
+        self._remaining = total
+        self._running = True
+        self._show_timer()
+        self._tick()
+
+    def _toggle_pause(self):
+        if self._running:
+            self._running = False
+            self._pause_resume_btn.config(text="Resume", fg=IOS_GREEN_BTN)
+        else:
+            self._running = True
+            self._pause_resume_btn.config(text="Pause", fg=IOS_RING_FG)
+            self._tick()
+
+    def _cancel_timer(self):
+        self._running = False
+        if self._after_id:
+            self.win.after_cancel(self._after_id)
+            self._after_id = None
+        self._show_picker()
+
+    def _tick(self):
+        if not self._running:
             return
-        self._pomo_seconds -= 1
-        self._update_pomo_display()
-        # 残り10秒で色変え
-        if self._pomo_seconds <= 10:
-            self._timer_display.config(fg=DOWN_COLOR)
-        self._pomo_after_id = self.win.after(1000, self._tick_pomo)
+        if self._remaining <= 0:
+            self._running = False
+            self._on_phase_done()
+            return
+        self._remaining -= 1
+        self._draw_ring()
+        self._after_id = self.win.after(1000, self._tick)
 
-    def _update_pomo_display(self):
-        m = self._pomo_seconds // 60
-        s = self._pomo_seconds % 60
-        self._timer_display.config(text=f"{m:02d}:{s:02d}")
-
-    def _on_pomo_phase_done(self):
-        """フェーズ完了 → 通知して次へ遷移"""
+    def _on_phase_done(self):
         if self._pomo_phase == "work":
             self._pomo_count += 1
             msg = f"Work session #{self._pomo_count} done!"
         else:
             msg = "Break is over. Time to focus!"
-        self._show_notification("POMODORO", msg, ACCENT)
-        self._flash_timer(0, callback=self._pomo_transition)
+        self._show_notification("TIMER", msg, IOS_GREEN_BTN)
+        self._flash_ring(0, callback=self._transition_phase)
 
-    def _pomo_transition(self):
-        """次のフェーズへ遷移"""
+    def _transition_phase(self):
         if self._pomo_phase == "work":
-            # ロングブレイク判定
             if self._pomo_count % POMO_LONG_BREAK_AFTER == 0:
                 self._pomo_phase = "break"
-                self._pomo_seconds = POMO_LONG_BREAK_MIN * 60
-                self._phase_label.config(text="LONG BREAK", fg=WARN_COLOR)
+                self._picker_min = POMO_LONG_BREAK_MIN
             else:
                 self._pomo_phase = "break"
-                self._pomo_seconds = POMO_BREAK_MIN * 60
-                self._phase_label.config(text="BREAK", fg=WARN_COLOR)
+                self._picker_min = POMO_BREAK_MIN
+            self._picker_sec = 0
+            self._phase_label.config(
+                text="BREAK" if self._picker_min == POMO_BREAK_MIN else "LONG BREAK",
+                fg=IOS_RING_BREAK
+            )
         else:
             self._pomo_phase = "work"
-            self._pomo_seconds = POMO_WORK_MIN * 60
-            self._phase_label.config(text="WORK", fg=UP_COLOR)
+            self._picker_min = POMO_WORK_MIN
+            self._picker_sec = 0
+            self._phase_label.config(text="WORK", fg=IOS_GREEN_BTN)
 
-        self._count_label.config(
-            text=f"Session: {self._pomo_count} / {POMO_LONG_BREAK_AFTER}"
-        )
-        self._timer_display.config(fg=ACCENT)
-        self._update_pomo_display()
+        # ピッカーに戻して次の時間を設定
+        self._show_picker()
 
-    def _flash_timer(self, count, callback=None):
-        """タイマー完了点滅"""
-        if count >= 10:
-            self._timer_display.config(fg=ACCENT)
+    def _flash_ring(self, count, callback=None):
+        if count >= 8:
             if callback:
                 callback()
             return
-        color = DOWN_COLOR if count % 2 == 0 else CARD_BG
-        self._timer_display.config(fg=color)
-        self.win.after(350, lambda: self._flash_timer(count + 1, callback))
+        if self._state != "timer":
+            if callback:
+                callback()
+            return
+        canvas = self._ring_canvas
+        size = self.RING_SIZE
+        if count % 2 == 0:
+            canvas.create_oval(
+                20, 20, size - 20, size - 20,
+                outline=IOS_RED_BTN, width=3
+            )
+        else:
+            self._draw_ring()
+        self.win.after(400, lambda: self._flash_ring(count + 1, callback))
 
     # ============================
     # スケジュールアラート
     # ============================
     def _build_schedule_section(self, parent):
         card_outer = tk.Frame(parent, bg=CARD_BORDER, padx=1, pady=1)
-        card_outer.pack(fill="x", padx=0, pady=2)
-        self._sched_card = tk.Frame(card_outer, bg=CARD_BG, padx=10, pady=6)
+        card_outer.pack(fill="x", pady=(2, 0))
+        self._sched_card = tk.Frame(card_outer, bg=IOS_BG, padx=10, pady=6)
         self._sched_card.pack(fill="x")
 
         tk.Label(self._sched_card, text="SCHEDULE ALERTS", font=FONT_SECTION,
-                 bg=CARD_BG, fg=FG_DIM).pack(anchor="w", pady=(0, 4))
+                 bg=IOS_BG, fg=IOS_TEXT_DIM).pack(anchor="w", pady=(0, 4))
 
         # 入力行1: 予定名
-        row1 = tk.Frame(self._sched_card, bg=CARD_BG)
+        row1 = tk.Frame(self._sched_card, bg=IOS_BG)
         row1.pack(fill="x", pady=(0, 2))
         tk.Label(row1, text="Event:", font=FONT_STATUS,
-                 bg=CARD_BG, fg=FG_DIM).pack(side="left")
+                 bg=IOS_BG, fg=IOS_TEXT_DIM).pack(side="left")
         self._sched_title_entry = tk.Entry(
             row1, width=18, font=FONT_STATUS,
-            bg=CARD_BORDER, fg=FG, insertbackground=FG,
+            bg=IOS_CARD, fg=IOS_TEXT, insertbackground=IOS_TEXT,
             relief="flat", bd=2
         )
         self._sched_title_entry.pack(side="left", padx=2, fill="x", expand=True)
 
         # 入力行2: 時刻 (HH:MM)
-        row2 = tk.Frame(self._sched_card, bg=CARD_BG)
+        row2 = tk.Frame(self._sched_card, bg=IOS_BG)
         row2.pack(fill="x", pady=(0, 4))
         tk.Label(row2, text="Time:", font=FONT_STATUS,
-                 bg=CARD_BG, fg=FG_DIM).pack(side="left")
+                 bg=IOS_BG, fg=IOS_TEXT_DIM).pack(side="left")
         self._sched_hour_entry = tk.Entry(
             row2, width=3, font=FONT_STATUS,
-            bg=CARD_BORDER, fg=FG, insertbackground=FG,
+            bg=IOS_CARD, fg=IOS_TEXT, insertbackground=IOS_TEXT,
             relief="flat", bd=2, justify="center"
         )
         self._sched_hour_entry.pack(side="left", padx=2)
         self._sched_hour_entry.insert(0, "09")
         tk.Label(row2, text=":", font=FONT_STATUS,
-                 bg=CARD_BG, fg=FG).pack(side="left")
+                 bg=IOS_BG, fg=IOS_TEXT).pack(side="left")
         self._sched_min_entry = tk.Entry(
             row2, width=3, font=FONT_STATUS,
-            bg=CARD_BORDER, fg=FG, insertbackground=FG,
+            bg=IOS_CARD, fg=IOS_TEXT, insertbackground=IOS_TEXT,
             relief="flat", bd=2, justify="center"
         )
         self._sched_min_entry.pack(side="left", padx=2)
         self._sched_min_entry.insert(0, "00")
 
-        add_btn = self._make_btn(row2, "+Add", ACCENT, self._add_schedule)
+        add_btn = self._make_btn(row2, "+Add", IOS_GREEN_BTN, self._add_schedule)
         add_btn.pack(side="left", padx=6)
 
         # スケジュール一覧
-        self._sched_list_frame = tk.Frame(self._sched_card, bg=CARD_BG)
+        self._sched_list_frame = tk.Frame(self._sched_card, bg=IOS_BG)
         self._sched_list_frame.pack(fill="x")
 
     def _add_schedule(self):
@@ -510,7 +849,7 @@ class TimerAlertPopup:
             "title": title,
             "hour": hour,
             "minute": minute,
-            "notified": set(),  # 通知済みの秒前を記録
+            "notified": set(),
         })
         self._sched_title_entry.delete(0, tk.END)
         self._render_schedule_list()
@@ -527,33 +866,31 @@ class TimerAlertPopup:
         now = datetime.now(ZoneInfo("Asia/Tokyo"))
 
         for i, sched in enumerate(self._schedules):
-            row = tk.Frame(self._sched_list_frame, bg=CARD_BG)
+            row = tk.Frame(self._sched_list_frame, bg=IOS_BG)
             row.pack(fill="x", pady=1)
 
-            # 完了判定: 全通知済みかつ時間が過ぎている
             target_min = sched["hour"] * 60 + sched["minute"]
             now_min = now.hour * 60 + now.minute
             is_past = now_min > target_min
             all_notified = len(sched["notified"]) >= len(SCHEDULE_NOTIFY_BEFORE)
-            color = FG_DIM if (is_past and all_notified) else ACCENT
+            color = IOS_TEXT_DIM if (is_past and all_notified) else IOS_RING_FG
 
             time_str = f"{sched['hour']:02d}:{sched['minute']:02d}"
             text = f"{time_str}  {sched['title']}"
 
             tk.Label(
                 row, text=text, font=FONT_STATUS,
-                bg=CARD_BG, fg=color, anchor="w"
+                bg=IOS_BG, fg=color, anchor="w"
             ).pack(side="left")
 
             del_btn = tk.Label(
                 row, text="\u2715", font=("Segoe UI", 7),
-                bg=CARD_BG, fg=CLOSE_FG, cursor="hand2"
+                bg=IOS_BG, fg=IOS_RED_BTN, cursor="hand2"
             )
             del_btn.pack(side="right")
             del_btn.bind("<Button-1>", lambda e, idx=i: self._remove_schedule(idx))
 
     def _tick_schedule_check(self):
-        """毎秒スケジュールをチェック"""
         now = datetime.now(ZoneInfo("Asia/Tokyo"))
         now_total_sec = now.hour * 3600 + now.minute * 60 + now.second
 
@@ -564,10 +901,7 @@ class TimerAlertPopup:
             for before_sec in SCHEDULE_NOTIFY_BEFORE:
                 if before_sec in sched["notified"]:
                     continue
-                # diff が before_sec 以下になったら通知 (ただし過ぎすぎは無視)
-                if 0 <= diff <= before_sec and diff <= before_sec:
-                    # before_sec の通知タイミング: diff が before_sec ちょうどか
-                    # 1秒の余裕を持って判定
+                if 0 <= diff <= before_sec:
                     if abs(diff - before_sec) <= 1 or (diff < before_sec and before_sec not in sched["notified"]):
                         sched["notified"].add(before_sec)
                         label = SCHEDULE_NOTIFY_LABELS.get(before_sec, f"{before_sec}s")
@@ -577,7 +911,7 @@ class TimerAlertPopup:
                             WARN_COLOR
                         )
                         self._render_schedule_list()
-                        break  # 1tickにつき1通知
+                        break
 
         self.win.after(1000, self._tick_schedule_check)
 
@@ -585,37 +919,35 @@ class TimerAlertPopup:
     # 通知ポップアップ (共通)
     # ============================
     def _show_notification(self, header, message, color):
-        """画面上部にポップアップ通知"""
         notif = tk.Toplevel(self.win)
         notif.overrideredirect(True)
         notif.attributes("-topmost", True)
         notif.configure(bg=color)
 
-        # ウィンドウの上に表示
         nx = self.win.winfo_x()
         ny = self.win.winfo_y() - 60
         notif.geometry(f"+{nx}+{ny}")
 
-        frame = tk.Frame(notif, bg=BG, padx=10, pady=6)
+        frame = tk.Frame(notif, bg=IOS_BG, padx=12, pady=8)
         frame.pack(padx=2, pady=2)
 
         tk.Label(
             frame, text=header, font=FONT_SECTION,
-            bg=BG, fg=color
+            bg=IOS_BG, fg=color
         ).pack(anchor="w")
         tk.Label(
             frame, text=message, font=FONT_LABEL,
-            bg=BG, fg=FG
+            bg=IOS_BG, fg=IOS_TEXT
         ).pack(anchor="w")
 
         dismiss = tk.Label(
-            frame, text="OK", font=FONT_TIMER_BTN,
-            bg=CARD_BORDER, fg=ACCENT, padx=8, pady=1, cursor="hand2"
+            frame, text="OK", font=FONT_TIMER_BTN_LG,
+            bg=IOS_GRAY_BTN_BG, fg=IOS_GREEN_BTN,
+            padx=10, pady=3, cursor="hand2"
         )
-        dismiss.pack(anchor="e", pady=(4, 0))
+        dismiss.pack(anchor="e", pady=(6, 0))
         dismiss.bind("<Button-1>", lambda e: notif.destroy())
 
-        # 10秒後に自動で閉じる
         notif.after(10000, lambda: notif.destroy() if notif.winfo_exists() else None)
 
     def close(self):
