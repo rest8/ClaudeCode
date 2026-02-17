@@ -112,7 +112,8 @@ FONT_ICON = ("Segoe UI", 9)
 def _fetch_via_yf_download(symbols):
     """方法1: yf.download() で一括取得（最も安定）"""
     import yfinance as yf
-    df = yf.download(symbols, period="5d", group_by="ticker", progress=False, threads=True)
+    df = yf.download(symbols, period="5d", group_by="ticker", progress=False,
+                     threads=True, auto_adjust=False)
     data = {}
     for sym in symbols:
         try:
@@ -135,7 +136,7 @@ def _fetch_via_yf_ticker(symbols):
     data = {}
     for sym in symbols:
         try:
-            hist = yf.Ticker(sym).history(period="5d")
+            hist = yf.Ticker(sym).history(period="5d", auto_adjust=False)
             if hist is not None and len(hist) >= 1:
                 price = float(hist["Close"].iloc[-1])
                 prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else None
