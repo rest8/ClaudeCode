@@ -354,8 +354,8 @@ class TimerAlertPopup:
     """iOS風タイマー＆スケジュールアラートのポップアップ"""
 
     # 円形プログレスリングのサイズ
-    RING_SIZE = 180
-    RING_WIDTH = 8
+    RING_SIZE = 200
+    RING_WIDTH = 12
 
     def __init__(self, parent, dashboard):
         self.dashboard = dashboard
@@ -580,14 +580,14 @@ class TimerAlertPopup:
         canvas = self._ring_canvas
         canvas.delete("all")
         size = self.RING_SIZE
-        pad = 14
+        pad = 20
         lw = self.RING_WIDTH
 
-        # 背景リング
-        canvas.create_oval(
+        # 背景リング (360度の円弧)
+        canvas.create_arc(
             pad, pad, size - pad, size - pad,
-            outline=IOS_RING_BG, width=lw, style="arc",
-            start=90, extent=-360
+            start=0, extent=359.9,
+            outline=IOS_RING_BG, width=lw, style="arc"
         )
 
         # プログレスリング
@@ -595,30 +595,27 @@ class TimerAlertPopup:
             progress = self._remaining / self._total_seconds
         else:
             progress = 0
-        extent = -360 * progress
         ring_color = IOS_RING_WORK if self._pomo_phase == "work" else IOS_RING_BREAK
-        canvas.create_arc(
-            pad, pad, size - pad, size - pad,
-            outline=ring_color, width=lw, style="arc",
-            start=90, extent=extent
-        )
+        if progress > 0:
+            extent = 360 * progress
+            canvas.create_arc(
+                pad, pad, size - pad, size - pad,
+                start=90, extent=extent,
+                outline=ring_color, width=lw, style="arc"
+            )
 
         # 中央のタイマーテキスト
         m = self._remaining // 60
         s = self._remaining % 60
         time_text = f"{m:02d}:{s:02d}"
-        canvas.create_text(
-            size / 2, size / 2 - 6,
-            text=time_text, font=FONT_TIMER_LARGE,
-            fill=IOS_TEXT
-        )
-        # 残り時間の小さいラベル
+        text_color = IOS_TEXT
         if self._remaining <= 10 and self._running:
-            canvas.create_text(
-                size / 2, size / 2 + 22,
-                text="finishing...", font=FONT_STATUS,
-                fill=IOS_RED_BTN
-            )
+            text_color = IOS_RED_BTN
+        canvas.create_text(
+            size / 2, size / 2,
+            text=time_text, font=FONT_TIMER_LARGE,
+            fill=text_color
+        )
 
     # ============================
     # iOS風丸ボタン
