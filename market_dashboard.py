@@ -240,34 +240,82 @@ SCHEDULE_NOTIFY_BEFORE = [600, 300, 120, 30]  # 10m, 5m, 2m, 30s
 SCHEDULE_NOTIFY_LABELS = {600: "10 min", 300: "5 min", 120: "2 min", 30: "30 sec"}
 
 
-class iOSScrollPicker(tk.Canvas):
-    """iOS風スクロールホイールピッカー (Canvas実装)"""
+class iOSWheelPicker(tk.Frame):
+    """iOS風ホイールピッカー (上下ボタン + 数値表示)"""
 
-    def __init__(self, parent, values, initial=0, width=60, height=150,
-                 label="", on_change=None, **kwargs):
-        super().__init__(parent, width=width, height=height,
-                         bg=IOS_BG, highlightthickness=0, **kwargs)
+    def __init__(self, parent, values, initial=0, label="", on_change=None, **kwargs):
+        super().__init__(parent, bg=IOS_BG, **kwargs)
         self._values = values
-        self._selected = initial  # 選択中のインデックス
-        self._item_h = 36        # 各アイテムの高さ
-        self._visible = 5        # 表示行数 (奇数)
+        self._selected = min(initial, len(values) - 1)
         self._label = label
         self._on_change = on_change
-        self._scroll_y = 0.0     # スクロールオフセット (アニメーション用)
-        self._target_y = 0.0
-        self._velocity = 0.0
-        self._dragging = False
-        self._last_y = 0
-        self._anim_id = None
 
-        self.bind("<Button-1>", self._on_press)
-        self.bind("<B1-Motion>", self._on_drag)
-        self.bind("<ButtonRelease-1>", self._on_release)
-        self.bind("<MouseWheel>", self._on_mousewheel)
-        self.bind("<Button-4>", lambda e: self._scroll_step(-1))
-        self.bind("<Button-5>", lambda e: self._scroll_step(1))
+        # 上矢印
+        up_btn = tk.Label(
+            self, text="\u25b2", font=("Segoe UI", 10),
+            bg=IOS_BG, fg=IOS_TEXT_DIM, cursor="hand2"
+        )
+        up_btn.pack(pady=(0, 2))
+        up_btn.bind("<Button-1>", lambda e: self._step(-1))
+        up_btn.bind("<Enter>", lambda e: up_btn.config(fg=IOS_TEXT))
+        up_btn.bind("<Leave>", lambda e: up_btn.config(fg=IOS_TEXT_DIM))
 
-        self._draw()
+        # 数値表示エリア (選択ハイライト帯)
+        sel_frame = tk.Frame(self, bg=IOS_PICKER_SEL, padx=8, pady=4)
+        sel_frame.pack(fill="x")
+
+        # 前の値 (薄く)
+        self._prev_label = tk.Label(
+            sel_frame, text="", font=FONT_PICKER_DIM,
+            bg=IOS_PICKER_SEL, fg=IOS_TEXT_DIM
+        )
+        self._prev_label.pack()
+
+        # セパレータ上
+        tk.Frame(sel_frame, bg=IOS_GRAY_BTN, height=1).pack(fill="x", pady=1)
+
+        # 選択中の値 + ラベル
+        center = tk.Frame(sel_frame, bg=IOS_PICKER_SEL)
+        center.pack(pady=2)
+        self._value_label = tk.Label(
+            center, text="", font=FONT_PICKER,
+            bg=IOS_PICKER_SEL, fg=IOS_TEXT, width=3
+        )
+        self._value_label.pack(side="left")
+        if label:
+            tk.Label(
+                center, text=label, font=FONT_PICKER_LABEL,
+                bg=IOS_PICKER_SEL, fg=IOS_TEXT_DIM
+            ).pack(side="left", padx=(2, 0))
+
+        # セパレータ下
+        tk.Frame(sel_frame, bg=IOS_GRAY_BTN, height=1).pack(fill="x", pady=1)
+
+        # 次の値 (薄く)
+        self._next_label = tk.Label(
+            sel_frame, text="", font=FONT_PICKER_DIM,
+            bg=IOS_PICKER_SEL, fg=IOS_TEXT_DIM
+        )
+        self._next_label.pack()
+
+        # 下矢印
+        down_btn = tk.Label(
+            self, text="\u25bc", font=("Segoe UI", 10),
+            bg=IOS_BG, fg=IOS_TEXT_DIM, cursor="hand2"
+        )
+        down_btn.pack(pady=(2, 0))
+        down_btn.bind("<Button-1>", lambda e: self._step(1))
+        down_btn.bind("<Enter>", lambda e: down_btn.config(fg=IOS_TEXT))
+        down_btn.bind("<Leave>", lambda e: down_btn.config(fg=IOS_TEXT_DIM))
+
+        # マウスホイール
+        for widget in [self, sel_frame, self._value_label,
+                       self._prev_label, self._next_label, center]:
+            widget.bind("<MouseWheel>", self._on_mousewheel)
+            widget.bind("<Button-4>", lambda e: self._step(-1))
+            widget.bind("<Button-5>", lambda e: self._step(1))
+
+        self._update_display()
 
     @property
     def value(self):
@@ -275,111 +323,31 @@ class iOSScrollPicker(tk.Canvas):
 
     def set_index(self, idx):
         self._selected = max(0, min(idx, len(self._values) - 1))
-        self._scroll_y = 0.0
-        self._draw()
+        self._update_display()
 
-    def _on_press(self, event):
-        self._dragging = True
-        self._last_y = event.y
-        self._velocity = 0.0
-        if self._anim_id:
-            self.after_cancel(self._anim_id)
-            self._anim_id = None
-
-    def _on_drag(self, event):
-        if not self._dragging:
-            return
-        dy = event.y - self._last_y
-        self._velocity = dy
-        self._scroll_y += dy
-        self._last_y = event.y
-        self._draw()
-
-    def _on_release(self, event):
-        self._dragging = False
-        # スクロール量からインデックス変更を計算
-        idx_delta = round(-self._scroll_y / self._item_h)
-        new_idx = self._selected + idx_delta
-        new_idx = max(0, min(new_idx, len(self._values) - 1))
-        self._selected = new_idx
-        self._scroll_y = 0.0
-        self._draw()
-        if self._on_change:
-            self._on_change(self._values[self._selected])
-
-    def _on_mousewheel(self, event):
-        delta = -1 if event.delta > 0 else 1
-        self._scroll_step(delta)
-
-    def _scroll_step(self, direction):
+    def _step(self, direction):
         new_idx = self._selected + direction
-        new_idx = max(0, min(new_idx, len(self._values) - 1))
-        if new_idx != self._selected:
+        if 0 <= new_idx < len(self._values):
             self._selected = new_idx
-            self._draw()
+            self._update_display()
             if self._on_change:
                 self._on_change(self._values[self._selected])
 
-    def _draw(self):
-        self.delete("all")
-        w = int(self.cget("width"))
-        h = int(self.cget("height"))
-        center_y = h / 2
+    def _on_mousewheel(self, event):
+        direction = -1 if event.delta > 0 else 1
+        self._step(direction)
 
-        # 選択行のハイライト帯
-        sel_top = center_y - self._item_h / 2
-        sel_bot = center_y + self._item_h / 2
-        self.create_rectangle(0, sel_top, w, sel_bot,
-                              fill=IOS_PICKER_SEL, outline="")
-        # 上下のセパレータライン
-        self.create_line(0, sel_top, w, sel_top, fill=IOS_GRAY_BTN, width=1)
-        self.create_line(0, sel_bot, w, sel_bot, fill=IOS_GRAY_BTN, width=1)
-
-        # 各アイテムを描画
-        half = self._visible // 2
-        for offset in range(-half, half + 1):
-            idx = self._selected + offset
-            if idx < 0 or idx >= len(self._values):
-                continue
-            y = center_y + offset * self._item_h + self._scroll_y
-            # 中心からの距離で透明度を変える
-            dist = abs(y - center_y)
-            max_dist = (half + 1) * self._item_h
-            if dist > max_dist:
-                continue
-
-            # フォントサイズと色を距離で変える
-            if dist < self._item_h * 0.6:
-                font = FONT_PICKER
-                color = IOS_TEXT
-            else:
-                font = FONT_PICKER_DIM
-                ratio = min(dist / max_dist, 1.0)
-                # 白→灰色にフェード
-                gray = int(255 * (1 - ratio * 0.7))
-                color = f"#{gray:02x}{gray:02x}{gray:02x}"
-
-            text = str(self._values[idx])
-            self.create_text(w / 2, y, text=text, font=font,
-                             fill=color, anchor="center")
-
-        # ラベル (min / sec)
-        if self._label:
-            self.create_text(w - 4, center_y, text=self._label,
-                             font=FONT_PICKER_LABEL, fill=IOS_TEXT_DIM,
-                             anchor="e")
-
-        # 上下グラデーション (フェード効果)
-        for i in range(20):
-            ratio = i / 20
-            alpha_hex = int(255 * (1 - ratio))
-            grad_color = f"#{0:02x}{0:02x}{0:02x}"
-            self.create_rectangle(0, i * 4, w, (i + 1) * 4,
-                                  fill=IOS_BG, outline="",
-                                  stipple="gray50" if ratio < 0.5 else "")
-            self.create_rectangle(0, h - (i + 1) * 4, w, h - i * 4,
-                                  fill=IOS_BG, outline="",
-                                  stipple="gray50" if ratio < 0.5 else "")
+    def _update_display(self):
+        self._value_label.config(text=str(self._values[self._selected]))
+        # 前後の値
+        if self._selected > 0:
+            self._prev_label.config(text=str(self._values[self._selected - 1]))
+        else:
+            self._prev_label.config(text="")
+        if self._selected < len(self._values) - 1:
+            self._next_label.config(text=str(self._values[self._selected + 1]))
+        else:
+            self._next_label.config(text="")
 
 
 class TimerAlertPopup:
@@ -510,25 +478,23 @@ class TimerAlertPopup:
 
         # 分ピッカー
         min_values = list(range(0, 100))
-        self._min_picker = iOSScrollPicker(
+        self._min_picker = iOSWheelPicker(
             picker_frame, min_values, initial=self._picker_min,
-            width=70, height=150, label="min",
-            on_change=self._on_min_change
+            label="min", on_change=self._on_min_change
         )
-        self._min_picker.pack(side="left", padx=(10, 0))
+        self._min_picker.pack(side="left", padx=(10, 4))
 
         # コロン
         tk.Label(picker_frame, text=":", font=FONT_TIMER_LARGE,
-                 bg=IOS_BG, fg=IOS_TEXT).pack(side="left", padx=2)
+                 bg=IOS_BG, fg=IOS_TEXT).pack(side="left", padx=4)
 
         # 秒ピッカー
         sec_values = list(range(0, 60))
-        self._sec_picker = iOSScrollPicker(
+        self._sec_picker = iOSWheelPicker(
             picker_frame, sec_values, initial=self._picker_sec,
-            width=70, height=150, label="sec",
-            on_change=self._on_sec_change
+            label="sec", on_change=self._on_sec_change
         )
-        self._sec_picker.pack(side="left", padx=(0, 10))
+        self._sec_picker.pack(side="left", padx=(4, 10))
 
         # プリセットボタン
         preset_frame = tk.Frame(self._display_frame, bg=IOS_BG)
