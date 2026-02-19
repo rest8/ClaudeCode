@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=World Monitor
+GenericName=Global Intelligence Dashboard
+Comment=Real-time global intelligence dashboard with interactive map
+Exec=bash -c 'cd /home/user/ClaudeCode && ./launch.sh'
+Icon=/home/user/ClaudeCode/static/icon.svg
+Terminal=false
+Categories=Network;Monitor;
+Keywords=news;world;map;intelligence;monitor;earthquake;conflict;
+StartupNotify=true
+StartupWMClass=world-monitor

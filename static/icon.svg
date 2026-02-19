@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="globe" cx="45%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#1a3a5c"/>
+      <stop offset="100%" stop-color="#0a0e17"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#06b6d4" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="80" fill="#0a0e17"/>
+  <!-- Outer glow -->
+  <circle cx="256" cy="240" r="200" fill="url(#glow)"/>
+  <!-- Globe -->
+  <circle cx="256" cy="240" r="150" fill="url(#globe)" stroke="#06b6d4" stroke-width="2"/>
+  <!-- Grid lines - longitude -->
+  <ellipse cx="256" cy="240" rx="150" ry="150" fill="none" stroke="#06b6d4" stroke-width="0.8" opacity="0.3"/>
+  <ellipse cx="256" cy="240" rx="100" ry="150" fill="none" stroke="#06b6d4" stroke-width="0.8" opacity="0.3"/>
+  <ellipse cx="256" cy="240" rx="40" ry="150" fill="none" stroke="#06b6d4" stroke-width="0.8" opacity="0.3"/>
+  <!-- Grid lines - latitude -->
+  <ellipse cx="256" cy="240" rx="150" ry="150" fill="none" stroke="#06b6d4" stroke-width="0.8" opacity="0.3"/>
+  <line x1="106" y1="190" x2="406" y2="190" stroke="#06b6d4" stroke-width="0.8" opacity="0.3"/>
+  <line x1="106" y1="240" x2="406" y2="240" stroke="#06b6d4" stroke-width="0.8" opacity="0.3"/>
+  <line x1="106" y1="290" x2="406" y2="290" stroke="#06b6d4" stroke-width="0.8" opacity="0.3"/>
+  <!-- Continents (simplified) -->
+  <!-- North America -->
+  <path d="M180 170 L200 160 L220 165 L230 180 L225 200 L210 210 L190 205 L175 190 Z"
+        fill="#22c55e" opacity="0.5"/>
+  <!-- Europe -->
+  <path d="M270 170 L290 165 L305 170 L310 185 L300 195 L280 190 L270 180 Z"
+        fill="#22c55e" opacity="0.5"/>
+  <!-- Africa -->
+  <path d="M275 210 L295 205 L305 220 L310 250 L300 280 L280 285 L270 260 L265 230 Z"
+        fill="#22c55e" opacity="0.5"/>
+  <!-- Asia -->
+  <path d="M310 170 L340 165 L365 175 L375 200 L370 220 L350 225 L325 215 L310 195 Z"
+        fill="#22c55e" opacity="0.5"/>
+  <!-- South America -->
+  <path d="M200 250 L215 245 L225 260 L225 290 L215 310 L200 305 L195 280 Z"
+        fill="#22c55e" opacity="0.5"/>
+  <!-- Alert dots -->
+  <circle cx="220" cy="185" r="5" fill="#ef4444" opacity="0.9">
+    <animate attributeName="opacity" values="0.9;0.4;0.9" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="290" cy="180" r="4" fill="#ef4444" opacity="0.9">
+    <animate attributeName="opacity" values="0.9;0.4;0.9" dur="2.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="340" cy="190" r="5" fill="#f97316" opacity="0.9">
+    <animate attributeName="opacity" values="0.9;0.4;0.9" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="280" cy="250" r="4" fill="#f97316" opacity="0.8">
+    <animate attributeName="opacity" values="0.8;0.3;0.8" dur="2.2s" repeatCount="indefinite"/>
+  </circle>
+  <!-- Radar sweep -->
+  <path d="M256 240 L256 90" stroke="#06b6d4" stroke-width="1.5" opacity="0.6">
+    <animateTransform attributeName="transform" type="rotate"
+      from="0 256 240" to="360 256 240" dur="6s" repeatCount="indefinite"/>
+  </path>
+  <!-- Title -->
+  <text x="256" y="440" text-anchor="middle" font-family="monospace" font-size="36"
+        font-weight="bold" fill="#06b6d4" letter-spacing="4">WORLD MONITOR</text>
+  <text x="256" y="470" text-anchor="middle" font-family="monospace" font-size="14"
+        fill="#64748b" letter-spacing="2">GLOBAL INTELLIGENCE</text>
+</svg>
