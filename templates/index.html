@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>World Monitor</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin="" />
+    <!-- Leaflet MarkerCluster CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- Header -->
+    <header id="header">
+        <div class="header-left">
+            <h1>WORLD MONITOR</h1>
+            <span class="subtitle">Global Intelligence Dashboard</span>
+        </div>
+        <div class="header-center">
+            <div id="clock"></div>
+            <div id="status-indicator">
+                <span class="dot"></span>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <button id="btn-refresh" title="Refresh data">&#x21bb;</button>
+            <button id="btn-alerts" title="Alerts only">&#x26a0;</button>
+            <button id="btn-layers" title="Toggle layers panel">Layers</button>
+        </div>
+    </header>
+
+    <!-- Main content -->
+    <div id="main">
+        <!-- Map -->
+        <div id="map-container">
+            <div id="map"></div>
+            <!-- Layer toggles overlay -->
+            <div id="layers-panel" class="hidden">
+                <h3>Map Layers</h3>
+                <label><input type="checkbox" id="layer-earthquakes" checked> Earthquakes</label>
+                <label><input type="checkbox" id="layer-conflicts" checked> Conflict Zones</label>
+                <label><input type="checkbox" id="layer-hotspots" checked> Intel Hotspots</label>
+                <label><input type="checkbox" id="layer-bases"> Military Bases</label>
+                <label><input type="checkbox" id="layer-nuclear"> Nuclear Facilities</label>
+                <label><input type="checkbox" id="layer-waterways"> Strategic Waterways</label>
+                <label><input type="checkbox" id="layer-cables"> Undersea Cables</label>
+                <label><input type="checkbox" id="layer-disasters"> Natural Disasters</label>
+                <label><input type="checkbox" id="layer-conflict-events"> Conflict Events (UCDP)</label>
+            </div>
+            <!-- Legend -->
+            <div id="legend">
+                <div class="legend-item"><span class="legend-dot" style="background:#ff4444"></span> Earthquake M5+</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#ff8800"></span> Earthquake M4.5+</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#ff4444;border-radius:0"></span> Conflict Zone</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#ffaa00"></span> Intel Hotspot</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#4488ff"></span> Military Base</div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div id="sidebar">
+            <!-- Tabs -->
+            <div id="sidebar-tabs">
+                <button class="tab active" data-tab="news">Live News</button>
+                <button class="tab" data-tab="alerts">Alerts</button>
+                <button class="tab" data-tab="intel">GDELT Intel</button>
+                <button class="tab" data-tab="stats">Stats</button>
+            </div>
+
+            <!-- News Panel -->
+            <div id="panel-news" class="panel active">
+                <div id="news-filters">
+                    <select id="news-source-filter">
+                        <option value="">All Sources</option>
+                    </select>
+                </div>
+                <div id="news-list" class="scroll-container">
+                    <div class="loading">Loading news...</div>
+                </div>
+            </div>
+
+            <!-- Alerts Panel -->
+            <div id="panel-alerts" class="panel">
+                <div id="alerts-list" class="scroll-container">
+                    <div class="loading">Loading alerts...</div>
+                </div>
+            </div>
+
+            <!-- GDELT Panel -->
+            <div id="panel-intel" class="panel">
+                <div id="gdelt-list" class="scroll-container">
+                    <div class="loading">Loading GDELT data...</div>
+                </div>
+            </div>
+
+            <!-- Stats Panel -->
+            <div id="panel-stats" class="panel">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-earthquakes">-</div>
+                        <div class="stat-label">Earthquakes (24h)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-conflicts">-</div>
+                        <div class="stat-label">Conflict Events</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-disasters">-</div>
+                        <div class="stat-label">Active Disasters</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-news">-</div>
+                        <div class="stat-label">News Articles</div>
+                    </div>
+                </div>
+                <h3>Monitored Countries</h3>
+                <div id="countries-list" class="scroll-container">
+                    {% for code, name in countries.items() %}
+                    <div class="country-item">
+                        <span class="country-code">{{ code }}</span>
+                        <span class="country-name">{{ name }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom ticker -->
+    <div id="ticker">
+        <div id="ticker-content"></div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <!-- Leaflet MarkerCluster -->
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="{{ url_for('static', filename='js/map.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
