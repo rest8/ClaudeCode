@@ -1,0 +1,44 @@
+# Omakase Auto-Booker Configuration
+# Copy this file to config.yaml and fill in your details.
+
+# --- Google Calendar ---
+google_credentials_path: "credentials.json"   # OAuth2 credentials from Google Cloud Console
+google_token_path: "token.json"               # Will be created on first auth
+calendar_id: "primary"                        # Calendar ID to check for free slots
+
+# --- Omakase Account ---
+omakase_email: "your-email@example.com"
+omakase_password: "your-password"
+
+# --- Booking Preferences ---
+booking_months_ahead: 2       # How many months ahead to search for availability
+min_free_hours: 3.0           # Minimum free time block (hours) needed in calendar
+
+# --- Target Restaurants ---
+# Add restaurants you want to auto-book.
+# Find the URL from your Omakase restaurant page.
+target_restaurants:
+  - name: "鮨 さいとう"
+    omakase_url: "https://omakase.in/r/example123"
+    party_size: 2
+    preferred_times:
+      - "18:00"
+      - "19:00"
+    course_keyword: null    # Optional: keyword to select a specific course
+
+  - name: "すきやばし次郎"
+    omakase_url: "https://omakase.in/r/example456"
+    party_size: 2
+    preferred_times:
+      - "11:30"
+      - "18:00"
+      - "19:00"
+    course_keyword: null
+
+# --- Scheduling ---
+check_interval_seconds: 30    # Polling interval for new slot checks
+reservation_open_time: "10:00"  # JST time when reservations typically open
+
+# --- Browser ---
+headless: true                # Set false for debugging (shows browser window)
+browser_timeout_ms: 30000
