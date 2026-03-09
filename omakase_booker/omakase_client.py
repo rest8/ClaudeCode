@@ -1,10 +1,15 @@
 """Omakase.in browser automation for reservation booking.
 
 Uses Playwright for browser automation since Omakase does not provide a public API.
+
+IMPORTANT: Omakase (omakase.in) の利用規約ではボットや自動操作が禁止されています。
+本ツールは学習・個人利用目的で作成されています。利用は自己責任で行ってください。
+アカウント停止等のリスクがあることをご理解の上ご使用ください。
+
 The flow:
   1. Log in to omakase.in
   2. Navigate to the target restaurant page
-  3. Check available dates/times
+  3. Check available dates/times (or enter lottery for lottery-based restaurants)
   4. Select matching slot and complete booking
 """
 
@@ -19,7 +24,7 @@ from .config import Config, RestaurantTarget
 logger = logging.getLogger(__name__)
 
 OMAKASE_BASE_URL = "https://omakase.in"
-LOGIN_URL = f"{OMAKASE_BASE_URL}/login"
+LOGIN_URL = f"{OMAKASE_BASE_URL}/users/sign_in"
 
 
 class OmakaseBookingError(Exception):
@@ -388,3 +393,100 @@ class OmakaseClient:
             "Booking result unclear. Screenshot saved to booking_result.png"
         )
         return False
+
+    async def enter_lottery(self, restaurant: RestaurantTarget) -> bool:
+        """Enter the lottery (raffle) for a restaurant.
+
+        Some popular restaurants use a lottery system instead of first-come-first-served.
+        Users can enter once every 24 hours; more entries increase chances.
+
+        Returns:
+            True if lottery entry was successful.
+        """
+        page = self._page
+        logger.info("Entering lottery for: %s", restaurant.name)
+
+        await page.goto(restaurant.omakase_url)
+        await page.wait_for_load_state("networkidle")
+
+        # Look for lottery/raffle entry button
+        lottery_btn = page.locator(
+            'button:has-text("抽選"), button:has-text("エントリー"), '
+            'a:has-text("抽選"), a:has-text("raffle"), '
+            'button:has-text("Raffle"), a:has-text("Entry"), '
+            '[class*="raffle"], [class*="lottery"]'
+        )
+
+        if await lottery_btn.count() == 0:
+            logger.info("No lottery button found for %s (may be first-come-first-served)", restaurant.name)
+            return False
+
+        await lottery_btn.first.click()
+        await page.wait_for_load_state("networkidle")
+
+        # Check if we need to select preferences before entering
+        # Select party size if available
+        party_selector = page.locator(
+            'select[name*="party"], select[name*="person"], '
+            'select[name*="guest"], select[name*="人数"]'
+        )
+        if await party_selector.count() > 0:
+            await party_selector.first.select_option(str(restaurant.party_size))
+
+        # Confirm lottery entry
+        confirm_btn = page.locator(
+            'button:has-text("応募"), button:has-text("エントリー"), '
+            'button:has-text("Enter"), button[type="submit"]'
+        )
+        if await confirm_btn.count() > 0:
+            await confirm_btn.first.click()
+            await page.wait_for_load_state("networkidle")
+
+        # Verify entry success
+        success = page.locator(
+            ':has-text("エントリー完了"), :has-text("応募しました"), '
+            ':has-text("Entry complete"), :has-text("entered")'
+        )
+        already_entered = page.locator(
+            ':has-text("エントリー済"), :has-text("応募済"), '
+            ':has-text("Already entered")'
+        )
+
+        if await success.count() > 0:
+            logger.info("Lottery entry successful for %s!", restaurant.name)
+            return True
+        elif await already_entered.count() > 0:
+            logger.info("Already entered lottery for %s", restaurant.name)
+            return True
+        else:
+            await page.screenshot(path=f"lottery_{restaurant.name}.png")
+            logger.warning("Lottery entry result unclear for %s", restaurant.name)
+            return False
+
+    async def check_lottery_result(self, restaurant: RestaurantTarget) -> str | None:
+        """Check if we won a lottery and have a booking window.
+
+        Returns:
+            The booking URL if won, None otherwise.
+        """
+        page = self._page
+        logger.info("Checking lottery result for: %s", restaurant.name)
+
+        await page.goto(restaurant.omakase_url)
+        await page.wait_for_load_state("networkidle")
+
+        # Look for winner notification or booking window
+        winner_link = page.locator(
+            'a:has-text("当選"), a:has-text("予約する"), '
+            'a:has-text("Winner"), [class*="winner"]'
+        )
+
+        if await winner_link.count() > 0:
+            href = await winner_link.first.get_attribute("href")
+            logger.info("Lottery won for %s! Booking link: %s", restaurant.name, href)
+            if href and not href.startswith("http"):
+                href = f"{OMAKASE_BASE_URL}{href}"
+            return href
+
+        logger.info("No lottery win detected for %s", restaurant.name)
+        return None

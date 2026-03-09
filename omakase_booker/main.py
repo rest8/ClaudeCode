@@ -105,6 +105,28 @@ async def run_booking_cycle(config: Config):
             if not restaurant.omakase_url:
                 continue
 
+            # Handle lottery-based restaurants
+            if restaurant.booking_mode == "lottery":
+                logger.info("Lottery mode for %s", restaurant.name)
+                # Check if we won a previous lottery
+                booking_url = await client.check_lottery_result(restaurant)
+                if booking_url:
+                    # We won! Get calendar availability and book
+                    try:
+                        calendar_available = get_available_dates(
+                            config, restaurant.preferred_times
+                        )
+                    except Exception:
+                        logger.exception("Failed to check calendar")
+                        continue
+                    if calendar_available:
+                        await try_book_restaurant(client, restaurant, calendar_available)
+                else:
+                    # Enter the lottery
+                    await client.enter_lottery(restaurant)
+                continue
+
+            # First-come-first-served mode
             # Get calendar availability for this restaurant's preferred times
             logger.info("Checking calendar for %s...", restaurant.name)
             try:
@@ -207,7 +229,15 @@ def main():
         print("Error: No target restaurants configured in config.yaml")
         sys.exit(1)
 
-    print(f"Omakase Auto-Booker")
+    print("=" * 60)
+    print("  Omakase Auto-Booker")
+    print("=" * 60)
+    print()
+    print("  WARNING: Omakase (omakase.in) の利用規約では")
+    print("  自動操作・ボットが禁止されています。")
+    print("  本ツールの使用は自己責任です。")
+    print("  アカウント停止のリスクがあります。")
+    print()
     print(f"  Monitoring {len(config.target_restaurants)} restaurant(s)")
     print(f"  Reservation open time: {config.reservation_open_time} JST")
     print(f"  Check interval: {config.check_interval_seconds}s")

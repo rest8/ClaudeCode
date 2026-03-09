@@ -15,6 +15,7 @@ class RestaurantTarget:
     party_size: int = 2
     preferred_times: list[str] = field(default_factory=lambda: ["18:00", "19:00", "20:00"])
     course_keyword: str | None = None  # Keyword to match a specific course
+    booking_mode: str = "first_come"  # "first_come" or "lottery"
 
 
 @dataclass

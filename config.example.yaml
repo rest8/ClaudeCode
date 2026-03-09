@@ -16,7 +16,8 @@ min_free_hours: 3.0           # Minimum free time block (hours) needed in calend
 
 # --- Target Restaurants ---
 # Add restaurants you want to auto-book.
-# Find the URL from your Omakase restaurant page.
+# Find the URL from your Omakase restaurant page (e.g. https://omakase.in/r/xx123456).
+# booking_mode: "first_come" (先着順) or "lottery" (抽選制)
 target_restaurants:
   - name: "鮨 さいとう"
     omakase_url: "https://omakase.in/r/example123"
@@ -25,6 +26,7 @@ target_restaurants:
       - "18:00"
       - "19:00"
     course_keyword: null    # Optional: keyword to select a specific course
+    booking_mode: "first_come"
 
   - name: "すきやばし次郎"
     omakase_url: "https://omakase.in/r/example456"
@@ -34,6 +36,7 @@ target_restaurants:
       - "18:00"
       - "19:00"
     course_keyword: null
+    booking_mode: "lottery"  # This restaurant uses the raffle system
 
 # --- Scheduling ---
 check_interval_seconds: 30    # Polling interval for new slot checks
