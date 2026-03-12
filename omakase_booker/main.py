@@ -16,7 +16,7 @@ import sys
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
-from .calendar_checker import get_available_dates
+from .calendar_checker import get_available_dates, create_booking_event
 from .config import Config, RestaurantTarget
 from .notifier import notify_failure, notify_success
 from .omakase_client import OmakaseClient, OmakaseBookingError
@@ -28,6 +28,9 @@ _booked: set[tuple[str, str, str]] = set()  # (restaurant_url, date, time)
 
 # Cache detected open times per restaurant URL
 _open_times: dict[str, str] = {}  # restaurant_url -> "YYYY-MM-DDTHH:MM" or "HH:MM"
+
+# Reference to current config (set in run_scheduler)
+_current_config: Config | None = None
 
 
 def _build_candidate_dates(
@@ -132,6 +135,17 @@ async def try_book_restaurant(
                 if success:
                     _booked.add(key)
                     notify_success(restaurant.name, slot_date, slot_time)
+                    # Add to Google Calendar
+                    try:
+                        create_booking_event(
+                            _current_config,
+                            restaurant.name,
+                            slot_date,
+                            slot_time,
+                            restaurant.party_size,
+                        )
+                    except Exception:
+                        logger.exception("Failed to create calendar event")
                     return True
                 else:
                     notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - booking/payment failed")
@@ -249,6 +263,8 @@ async def run_scheduler(config: Config):
     - Near a restaurant's reservation open time: poll rapidly (0.5s)
     - Otherwise: poll at the configured interval
     """
+    global _current_config
+    _current_config = config
     logger.info("Omakase Auto-Booker started. Monitoring %d restaurants.", len(config.target_restaurants))
 
     # Handle graceful shutdown

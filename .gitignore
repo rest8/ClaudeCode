@@ -13,4 +13,9 @@ token.json
 
 # Debug artifacts
 booking_result.png
+payment_result.png
+lottery_*.png
 *.log
+
+# PyInstaller
+*.spec.bak
