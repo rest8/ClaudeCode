@@ -247,13 +247,16 @@ class OmakaseClient:
             return result
         return None
 
-    async def book_slot(
+    async def reserve_slot(
         self,
         restaurant: RestaurantTarget,
         target_date: str,
         target_time: str,
     ) -> bool:
-        """Attempt to book a specific slot and complete payment.
+        """Reserve a slot (confirm booking) WITHOUT completing payment.
+
+        This selects the slot and confirms the reservation up to the payment step.
+        Call complete_payment() separately after approval is obtained.
 
         Args:
             restaurant: Target restaurant config.
@@ -261,11 +264,11 @@ class OmakaseClient:
             target_time: Time string (HH:MM).
 
         Returns:
-            True if booking and payment succeeded.
+            True if reservation was confirmed (ready for payment).
         """
         page = self._page
         logger.info(
-            "Attempting to book %s on %s at %s (party: %d)",
+            "Reserving %s on %s at %s (party: %d)",
             restaurant.name,
             target_date,
             target_time,
@@ -297,16 +300,41 @@ class OmakaseClient:
         if restaurant.course_keyword:
             await self._select_course(restaurant.course_keyword)
 
-        # Step 5: Confirm the reservation
+        # Step 5: Confirm the reservation (but do NOT pay yet)
         confirmed = await self._confirm_booking()
         if not confirmed:
             return False
 
-        # Step 6: Complete payment (seat reservation fee ¥390/person)
+        logger.info("Slot reserved, awaiting payment approval...")
+        return True
+
+    async def complete_payment(self) -> bool:
+        """Complete the payment step for an already-reserved slot.
+
+        Should be called after reserve_slot() and after user approval.
+
+        Returns:
+            True if payment succeeded.
+        """
         paid = await self._complete_payment()
         if not paid:
-            logger.warning("Booking confirmed but payment may have failed. Check your account.")
-        return True
+            logger.warning("Payment may have failed. Check your account.")
+        return paid
+
+    async def book_slot(
+        self,
+        restaurant: RestaurantTarget,
+        target_date: str,
+        target_time: str,
+    ) -> bool:
+        """Reserve a slot and complete payment in one step (no approval gate).
+
+        For backward compatibility with flows that don't use approval.
+        """
+        reserved = await self.reserve_slot(restaurant, target_date, target_time)
+        if not reserved:
+            return False
+        return await self.complete_payment()
 
     async def _navigate_to_date(self, target_date: str):
         """Navigate the calendar to the target date."""

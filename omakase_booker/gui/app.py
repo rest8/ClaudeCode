@@ -13,6 +13,7 @@ from tkcalendar import Calendar
 
 from ..config import Config, RestaurantTarget
 from ..calendar_checker import get_events_for_range, create_booking_event
+from ..approval import request_approval, APPROVED, REJECTED, PENDING
 from ..omakase_client import OmakaseClient, OmakaseBookingError
 
 logger = logging.getLogger(__name__)
@@ -442,21 +443,45 @@ class OmakaseApp:
                             if slot_time not in restaurant.preferred_times:
                                 continue
 
-                            self._log(f"マッチ! {date_str} {slot_time} - 予約中...")
-                            self._update_status(f"予約中: {date_str} {slot_time}")
+                            self._log(f"マッチ! {date_str} {slot_time} - 予約確保中...")
+                            self._update_status(f"予約確保中: {date_str} {slot_time}")
 
                             try:
-                                success = await client.book_slot(
+                                # Phase 1: Reserve the slot (no payment yet)
+                                reserved = await client.reserve_slot(
                                     restaurant, date_str, slot_time
                                 )
-                                if success:
-                                    self._log(f"予約成功! {restaurant.name} {date_str} {slot_time}")
-                                    self._on_booking_success(
-                                        restaurant, date_str, slot_time
-                                    )
-                                    return
+                                if not reserved:
+                                    self._log(f"予約確保失敗: {date_str} {slot_time}")
+                                    continue
+
+                                self._log("予約枠を確保しました。承認待ち...")
+
+                                # Phase 2: Request approval via Google Chat
+                                approval_result = await self._request_payment_approval(
+                                    restaurant, date_str, slot_time
+                                )
+
+                                if approval_result == APPROVED:
+                                    # Phase 3: Complete payment
+                                    self._log("承認されました。決済を実行中...")
+                                    self._update_status(f"決済中: {date_str} {slot_time}")
+                                    paid = await client.complete_payment()
+                                    if paid:
+                                        self._log(f"予約・決済完了! {restaurant.name} {date_str} {slot_time}")
+                                        self._on_booking_success(
+                                            restaurant, date_str, slot_time
+                                        )
+                                        return
+                                    else:
+                                        self._log(f"決済失敗: {date_str} {slot_time}")
+                                elif approval_result == REJECTED:
+                                    self._log("却下されました。決済をスキップします。")
+                                    self._update_status("承認却下")
                                 else:
-                                    self._log(f"予約失敗: {date_str} {slot_time}")
+                                    self._log("承認タイムアウト。決済をスキップします。")
+                                    self._update_status("承認タイムアウト")
+
                             except Exception as e:
                                 self._log(f"予約エラー: {e}")
 
@@ -478,6 +503,69 @@ class OmakaseApp:
             self._update_status("ログインエラー")
         finally:
             await client.close()
+
+    async def _request_payment_approval(
+        self,
+        restaurant: RestaurantTarget,
+        date_str: str,
+        time_str: str,
+    ) -> str:
+        """Request payment approval via Google Chat or GUI dialog.
+
+        Returns: "approved", "rejected", or "pending" (timeout).
+        """
+        if self.config.gchat_webhook_url:
+            # Send approval request to Google Chat and wait
+            self._log("Google Chat に承認依頼を送信中...")
+            self._update_status("承認待ち (Google Chat)")
+
+            result = await request_approval(
+                webhook_url=self.config.gchat_webhook_url,
+                restaurant_name=restaurant.name,
+                booking_date=date_str,
+                booking_time=time_str,
+                party_size=restaurant.party_size,
+                fee_per_person=self.config.approval_fee_per_person,
+                callback_url=self.config.gchat_callback_url or None,
+                timeout_seconds=self.config.approval_timeout_seconds,
+            )
+
+            if result == PENDING:
+                # Timeout - fall back to GUI dialog
+                self._log("Google Chat からの応答がありません。アプリで確認します。")
+                return await self._gui_approval_dialog(restaurant, date_str, time_str)
+
+            return result
+        else:
+            # No Google Chat configured - use GUI dialog
+            return await self._gui_approval_dialog(restaurant, date_str, time_str)
+
+    async def _gui_approval_dialog(
+        self,
+        restaurant: RestaurantTarget,
+        date_str: str,
+        time_str: str,
+    ) -> str:
+        """Show a GUI confirmation dialog for payment approval."""
+        total_fee = self.config.approval_fee_per_person * restaurant.party_size
+        future = asyncio.get_event_loop().create_future()
+
+        def _show_dialog():
+            result = messagebox.askyesno(
+                "決済承認",
+                f"以下の予約の決済を実行しますか？\n\n"
+                f"レストラン: {restaurant.name}\n"
+                f"日時: {date_str} {time_str}\n"
+                f"人数: {restaurant.party_size}名\n"
+                f"手数料: ¥{self.config.approval_fee_per_person:,} x {restaurant.party_size}名"
+                f" = ¥{total_fee:,}\n",
+            )
+            self.root.after(0, lambda: future.get_loop().call_soon_threadsafe(
+                future.set_result, APPROVED if result else REJECTED
+            ))
+
+        self.root.after(0, _show_dialog)
+        return await future
 
     def _get_poll_interval(self, open_time_str: str | None) -> float:
         """Calculate polling interval based on proximity to open time."""

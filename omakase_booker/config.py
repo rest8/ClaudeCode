@@ -43,6 +43,12 @@ class Config:
     fast_poll_interval_seconds: float = 0.5  # Interval during fast-polling near open time
     fast_poll_window_minutes: int = 5  # Minutes before/after open time for fast polling
 
+    # Google Chat approval
+    gchat_webhook_url: str = ""  # Google Chat incoming webhook URL
+    gchat_callback_url: str = ""  # Public URL for approval callback (e.g. ngrok)
+    approval_timeout_seconds: int = 300  # Max seconds to wait for approval (5 min)
+    approval_fee_per_person: int = 390  # Seat reservation fee per person (JPY)
+
     # Browser
     headless: bool = True
     browser_timeout_ms: int = 30000

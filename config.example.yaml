@@ -52,6 +52,14 @@ check_interval_seconds: 30        # Normal polling interval (seconds)
 fast_poll_interval_seconds: 0.5   # Fast polling near reservation open time (seconds)
 fast_poll_window_minutes: 5       # Minutes before/after open time for fast polling
 
+# --- Google Chat Approval ---
+# 決済前にGoogle Chatで承認依頼を送信します。
+# webhook URLを設定しない場合、アプリ上のダイアログで確認します。
+gchat_webhook_url: ""             # Google Chat incoming webhook URL
+gchat_callback_url: ""            # Public callback URL (e.g. ngrok forwarding URL)
+approval_timeout_seconds: 300     # Approval timeout (5 min)
+approval_fee_per_person: 390      # Seat reservation fee per person (JPY)
+
 # --- Browser ---
 headless: true                    # Set false for debugging (shows browser window)
 browser_timeout_ms: 30000

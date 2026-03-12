@@ -16,6 +16,7 @@ import sys
 from datetime import datetime, time, timedelta
 from pathlib import Path
 
+from .approval import request_approval, APPROVED, REJECTED, PENDING
 from .calendar_checker import get_available_dates, create_booking_event
 from .config import Config, RestaurantTarget
 from .notifier import notify_failure, notify_success
@@ -121,18 +122,37 @@ async def try_book_restaurant(
             if key in _booked:
                 continue
 
-            # Try to book (includes payment)!
+            # Phase 1: Reserve the slot (no payment yet)
             logger.info(
-                "Match found! %s on %s at %s",
+                "Match found! %s on %s at %s - reserving...",
                 restaurant.name,
                 slot_date,
                 slot_time,
             )
             try:
-                success = await client.book_slot(
+                reserved = await client.reserve_slot(
                     restaurant, slot_date, slot_time
                 )
-                if success:
+                if not reserved:
+                    notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - reservation failed")
+                    continue
+
+                # Phase 2: Request approval via Google Chat
+                approval = await _request_cli_approval(
+                    restaurant, slot_date, slot_time
+                )
+
+                if approval != APPROVED:
+                    logger.info("Payment %s for %s %s %s",
+                                "rejected" if approval == REJECTED else "timed out",
+                                restaurant.name, slot_date, slot_time)
+                    notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - approval {approval}")
+                    continue
+
+                # Phase 3: Complete payment
+                logger.info("Approval received, completing payment...")
+                paid = await client.complete_payment()
+                if paid:
                     _booked.add(key)
                     notify_success(restaurant.name, slot_date, slot_time)
                     # Add to Google Calendar
@@ -148,12 +168,60 @@ async def try_book_restaurant(
                         logger.exception("Failed to create calendar event")
                     return True
                 else:
-                    notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - booking/payment failed")
+                    notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - payment failed")
             except Exception:
                 logger.exception("Error booking %s", restaurant.name)
                 notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - exception")
 
     return False
+
+
+async def _request_cli_approval(
+    restaurant: RestaurantTarget,
+    slot_date: str,
+    slot_time: str,
+) -> str:
+    """Request approval for payment in CLI mode.
+
+    Uses Google Chat if configured, otherwise falls back to CLI prompt.
+    """
+    config = _current_config
+    if not config:
+        return APPROVED
+
+    if config.gchat_webhook_url:
+        logger.info("Sending approval request to Google Chat...")
+        result = await request_approval(
+            webhook_url=config.gchat_webhook_url,
+            restaurant_name=restaurant.name,
+            booking_date=slot_date,
+            booking_time=slot_time,
+            party_size=restaurant.party_size,
+            fee_per_person=config.approval_fee_per_person,
+            callback_url=config.gchat_callback_url or None,
+            timeout_seconds=config.approval_timeout_seconds,
+        )
+        if result != PENDING:
+            return result
+        logger.info("Google Chat approval timed out, falling back to CLI prompt")
+
+    # Fallback: CLI prompt
+    total_fee = config.approval_fee_per_person * restaurant.party_size
+    print()
+    print("=" * 50)
+    print("  決済承認依頼")
+    print("=" * 50)
+    print(f"  レストラン: {restaurant.name}")
+    print(f"  日時: {slot_date} {slot_time}")
+    print(f"  人数: {restaurant.party_size}名")
+    print(f"  手数料: ¥{config.approval_fee_per_person:,} x {restaurant.party_size} = ¥{total_fee:,}")
+    print()
+
+    answer = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: input("  決済を実行しますか？ (y/n): ").strip().lower(),
+    )
+    return APPROVED if answer in ("y", "yes") else REJECTED
 
 
 async def detect_open_times(client: OmakaseClient, config: Config):
