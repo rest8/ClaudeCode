@@ -101,6 +101,13 @@ async def try_book_restaurant(
         logger.info("No available slots on Omakase for %s", restaurant.name)
         return False
 
+    # Scrape cancellation policy once for approval cards
+    cancellation_policy = ""
+    try:
+        cancellation_policy = await client.scrape_cancellation_policy(restaurant)
+    except Exception:
+        logger.exception("Failed to scrape cancellation policy for %s", restaurant.name)
+
     # Match Omakase slots with candidate dates
     for cal_date, cal_times in candidate_dates:
         date_str = cal_date.strftime("%Y-%m-%d")
@@ -139,7 +146,7 @@ async def try_book_restaurant(
 
                 # Phase 2: Request approval via Google Chat
                 approval = await _request_cli_approval(
-                    restaurant, slot_date, slot_time
+                    restaurant, slot_date, slot_time, cancellation_policy
                 )
 
                 if approval != APPROVED:
@@ -180,6 +187,7 @@ async def _request_cli_approval(
     restaurant: RestaurantTarget,
     slot_date: str,
     slot_time: str,
+    cancellation_policy: str = "",
 ) -> str:
     """Request approval for payment in CLI mode.
 
@@ -200,6 +208,7 @@ async def _request_cli_approval(
             fee_per_person=config.approval_fee_per_person,
             callback_url=config.gchat_callback_url or None,
             timeout_seconds=config.approval_timeout_seconds,
+            cancellation_policy=cancellation_policy,
         )
         if result != PENDING:
             return result
@@ -215,6 +224,11 @@ async def _request_cli_approval(
     print(f"  日時: {slot_date} {slot_time}")
     print(f"  人数: {restaurant.party_size}名")
     print(f"  手数料: ¥{config.approval_fee_per_person:,} x {restaurant.party_size} = ¥{total_fee:,}")
+    if cancellation_policy:
+        print()
+        print("  【キャンセルポリシー】")
+        for line in cancellation_policy.split("\n"):
+            print(f"  {line}")
     print()
 
     answer = await asyncio.get_event_loop().run_in_executor(

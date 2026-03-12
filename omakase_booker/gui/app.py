@@ -411,6 +411,13 @@ class OmakaseApp:
             else:
                 self._log("予約開始時刻を検出できませんでした (通常ポーリングで監視)")
 
+            # Scrape cancellation policy for approval card
+            self._update_status("キャンセルポリシーを取得中...")
+            cancellation_policy = await client.scrape_cancellation_policy(restaurant)
+            self._log(f"キャンセルポリシー: {cancellation_policy[:80]}..."
+                       if len(cancellation_policy) > 80 else
+                       f"キャンセルポリシー: {cancellation_policy}")
+
             attempt = 0
             while not self._stop_event.is_set():
                 attempt += 1
@@ -459,7 +466,7 @@ class OmakaseApp:
 
                                 # Phase 2: Request approval via Google Chat
                                 approval_result = await self._request_payment_approval(
-                                    restaurant, date_str, slot_time
+                                    restaurant, date_str, slot_time, cancellation_policy
                                 )
 
                                 if approval_result == APPROVED:
@@ -509,6 +516,7 @@ class OmakaseApp:
         restaurant: RestaurantTarget,
         date_str: str,
         time_str: str,
+        cancellation_policy: str = "",
     ) -> str:
         """Request payment approval via Google Chat or GUI dialog.
 
@@ -528,38 +536,45 @@ class OmakaseApp:
                 fee_per_person=self.config.approval_fee_per_person,
                 callback_url=self.config.gchat_callback_url or None,
                 timeout_seconds=self.config.approval_timeout_seconds,
+                cancellation_policy=cancellation_policy,
             )
 
             if result == PENDING:
                 # Timeout - fall back to GUI dialog
                 self._log("Google Chat からの応答がありません。アプリで確認します。")
-                return await self._gui_approval_dialog(restaurant, date_str, time_str)
+                return await self._gui_approval_dialog(restaurant, date_str, time_str, cancellation_policy)
 
             return result
         else:
             # No Google Chat configured - use GUI dialog
-            return await self._gui_approval_dialog(restaurant, date_str, time_str)
+            return await self._gui_approval_dialog(restaurant, date_str, time_str, cancellation_policy)
 
     async def _gui_approval_dialog(
         self,
         restaurant: RestaurantTarget,
         date_str: str,
         time_str: str,
+        cancellation_policy: str = "",
     ) -> str:
         """Show a GUI confirmation dialog for payment approval."""
         total_fee = self.config.approval_fee_per_person * restaurant.party_size
         future = asyncio.get_event_loop().create_future()
 
+        msg = (
+            f"以下の予約の決済を実行しますか？\n\n"
+            f"レストラン: {restaurant.name}\n"
+            f"日時: {date_str} {time_str}\n"
+            f"人数: {restaurant.party_size}名\n"
+            f"手数料: ¥{self.config.approval_fee_per_person:,} x {restaurant.party_size}名"
+            f" = ¥{total_fee:,}\n"
+        )
+        if cancellation_policy:
+            # Truncate for dialog readability
+            policy_display = cancellation_policy[:200] + "..." if len(cancellation_policy) > 200 else cancellation_policy
+            msg += f"\n【キャンセルポリシー】\n{policy_display}\n"
+
         def _show_dialog():
-            result = messagebox.askyesno(
-                "決済承認",
-                f"以下の予約の決済を実行しますか？\n\n"
-                f"レストラン: {restaurant.name}\n"
-                f"日時: {date_str} {time_str}\n"
-                f"人数: {restaurant.party_size}名\n"
-                f"手数料: ¥{self.config.approval_fee_per_person:,} x {restaurant.party_size}名"
-                f" = ¥{total_fee:,}\n",
-            )
+            result = messagebox.askyesno("決済承認", msg)
             self.root.after(0, lambda: future.get_loop().call_soon_threadsafe(
                 future.set_result, APPROVED if result else REJECTED
             ))

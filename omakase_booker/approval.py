@@ -134,6 +134,7 @@ def send_approval_request(
     party_size: int,
     fee_per_person: int = 390,
     callback_url: str | None = None,
+    cancellation_policy: str = "",
 ) -> bool:
     """Send an approval request card to Google Chat.
 
@@ -145,6 +146,7 @@ def send_approval_request(
         party_size: Number of guests.
         fee_per_person: Seat reservation fee per person (JPY).
         callback_url: Base URL for approval/rejection callbacks.
+        cancellation_policy: Cancellation policy text from the restaurant page.
 
     Returns:
         True if the message was sent successfully.
@@ -152,16 +154,16 @@ def send_approval_request(
     total_fee = fee_per_person * party_size
 
     if callback_url:
-        # Interactive card with approve/reject buttons
         payload = _build_card_message(
             restaurant_name, booking_date, booking_time,
             party_size, fee_per_person, total_fee, callback_url,
+            cancellation_policy,
         )
     else:
-        # Simple text message (user must approve via app)
         payload = _build_text_message(
             restaurant_name, booking_date, booking_time,
             party_size, fee_per_person, total_fee,
+            cancellation_policy,
         )
 
     return _post_to_webhook(webhook_url, payload)
@@ -175,8 +177,101 @@ def _build_card_message(
     fee_per_person: int,
     total_fee: int,
     callback_url: str,
+    cancellation_policy: str = "",
 ) -> dict:
     """Build a Google Chat card message with approval buttons."""
+    # Reservation details section
+    reservation_widgets = [
+        {
+            "decoratedText": {
+                "topLabel": "レストラン",
+                "text": restaurant_name,
+                "startIcon": {"knownIcon": "RESTAURANT_ICON"},
+            }
+        },
+        {
+            "decoratedText": {
+                "topLabel": "日時",
+                "text": f"{booking_date} {booking_time}",
+                "startIcon": {"knownIcon": "CLOCK"},
+            }
+        },
+        {
+            "decoratedText": {
+                "topLabel": "人数",
+                "text": f"{party_size}名",
+                "startIcon": {"knownIcon": "PERSON"},
+            }
+        },
+        {
+            "decoratedText": {
+                "topLabel": "席予約手数料",
+                "text": f"¥{fee_per_person:,} x {party_size}名 = ¥{total_fee:,}",
+                "startIcon": {"knownIcon": "DOLLAR"},
+            }
+        },
+    ]
+
+    sections = [
+        {
+            "header": "予約内容",
+            "widgets": reservation_widgets,
+        },
+    ]
+
+    # Cancellation policy section
+    if cancellation_policy:
+        sections.append({
+            "header": "キャンセルポリシー",
+            "widgets": [
+                {
+                    "textParagraph": {
+                        "text": cancellation_policy,
+                    }
+                },
+            ],
+        })
+
+    # Buttons section
+    sections.append({
+        "widgets": [
+            {
+                "buttonList": {
+                    "buttons": [
+                        {
+                            "text": "承認（決済実行）",
+                            "color": {
+                                "red": 0.204,
+                                "green": 0.659,
+                                "blue": 0.325,
+                                "alpha": 1.0,
+                            },
+                            "onClick": {
+                                "openLink": {
+                                    "url": f"{callback_url}/approve",
+                                }
+                            },
+                        },
+                        {
+                            "text": "却下（キャンセル）",
+                            "color": {
+                                "red": 0.918,
+                                "green": 0.263,
+                                "blue": 0.208,
+                                "alpha": 1.0,
+                            },
+                            "onClick": {
+                                "openLink": {
+                                    "url": f"{callback_url}/reject",
+                                }
+                            },
+                        },
+                    ]
+                }
+            }
+        ],
+    })
+
     return {
         "cardsV2": [
             {
@@ -188,79 +283,7 @@ def _build_card_message(
                         "imageUrl": "https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/restaurant/default/48px.svg",
                         "imageType": "CIRCLE",
                     },
-                    "sections": [
-                        {
-                            "header": "予約内容",
-                            "widgets": [
-                                {
-                                    "decoratedText": {
-                                        "topLabel": "レストラン",
-                                        "text": restaurant_name,
-                                        "startIcon": {"knownIcon": "RESTAURANT_ICON"},
-                                    }
-                                },
-                                {
-                                    "decoratedText": {
-                                        "topLabel": "日時",
-                                        "text": f"{booking_date} {booking_time}",
-                                        "startIcon": {"knownIcon": "CLOCK"},
-                                    }
-                                },
-                                {
-                                    "decoratedText": {
-                                        "topLabel": "人数",
-                                        "text": f"{party_size}名",
-                                        "startIcon": {"knownIcon": "PERSON"},
-                                    }
-                                },
-                                {
-                                    "decoratedText": {
-                                        "topLabel": "席予約手数料",
-                                        "text": f"¥{fee_per_person:,} x {party_size}名 = ¥{total_fee:,}",
-                                        "startIcon": {"knownIcon": "DOLLAR"},
-                                    }
-                                },
-                            ],
-                        },
-                        {
-                            "widgets": [
-                                {
-                                    "buttonList": {
-                                        "buttons": [
-                                            {
-                                                "text": "承認（決済実行）",
-                                                "color": {
-                                                    "red": 0.204,
-                                                    "green": 0.659,
-                                                    "blue": 0.325,
-                                                    "alpha": 1.0,
-                                                },
-                                                "onClick": {
-                                                    "openLink": {
-                                                        "url": f"{callback_url}/approve",
-                                                    }
-                                                },
-                                            },
-                                            {
-                                                "text": "却下（キャンセル）",
-                                                "color": {
-                                                    "red": 0.918,
-                                                    "green": 0.263,
-                                                    "blue": 0.208,
-                                                    "alpha": 1.0,
-                                                },
-                                                "onClick": {
-                                                    "openLink": {
-                                                        "url": f"{callback_url}/reject",
-                                                    }
-                                                },
-                                            },
-                                        ]
-                                    }
-                                }
-                            ],
-                        },
-                    ],
+                    "sections": sections,
                 },
             }
         ]
@@ -274,18 +297,20 @@ def _build_text_message(
     party_size: int,
     fee_per_person: int,
     total_fee: int,
+    cancellation_policy: str = "",
 ) -> dict:
     """Build a simple text message for approval notification."""
-    return {
-        "text": (
-            "🔔 *予約決済の承認依頼*\n\n"
-            f"レストラン: {restaurant_name}\n"
-            f"日時: {booking_date} {booking_time}\n"
-            f"人数: {party_size}名\n"
-            f"席予約手数料: ¥{fee_per_person:,} x {party_size}名 = ¥{total_fee:,}\n\n"
-            "⚠️ アプリ上で承認/却下してください。"
-        ),
-    }
+    text = (
+        "🔔 *予約決済の承認依頼*\n\n"
+        f"レストラン: {restaurant_name}\n"
+        f"日時: {booking_date} {booking_time}\n"
+        f"人数: {party_size}名\n"
+        f"席予約手数料: ¥{fee_per_person:,} x {party_size}名 = ¥{total_fee:,}\n"
+    )
+    if cancellation_policy:
+        text += f"\n📋 *キャンセルポリシー*\n{cancellation_policy}\n"
+    text += "\n⚠️ アプリ上で承認/却下してください。"
+    return {"text": text}
 
 
 def _post_to_webhook(webhook_url: str, payload: dict) -> bool:
@@ -319,6 +344,7 @@ async def request_approval(
     fee_per_person: int = 390,
     callback_url: str | None = None,
     timeout_seconds: int = 300,
+    cancellation_policy: str = "",
 ) -> str:
     """Send an approval request and wait for the response.
 
@@ -333,6 +359,7 @@ async def request_approval(
         fee_per_person: Fee per person in JPY.
         callback_url: Callback URL for interactive buttons.
         timeout_seconds: Max wait time for approval.
+        cancellation_policy: Cancellation policy text from the restaurant.
 
     Returns:
         "approved", "rejected", or "pending" (timeout).
@@ -356,6 +383,7 @@ async def request_approval(
             party_size,
             fee_per_person,
             callback_url,
+            cancellation_policy,
         )
 
         if not sent:

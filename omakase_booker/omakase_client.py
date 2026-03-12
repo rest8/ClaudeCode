@@ -155,6 +155,72 @@ class OmakaseClient:
         logger.info("Could not detect reservation open time for %s", restaurant.name)
         return None
 
+    async def scrape_cancellation_policy(
+        self,
+        restaurant: RestaurantTarget,
+    ) -> str:
+        """Scrape the cancellation policy from a restaurant's page.
+
+        Returns:
+            Cancellation policy text, or a default message if not found.
+        """
+        page = self._page
+        logger.info("Scraping cancellation policy for: %s", restaurant.name)
+
+        # Navigate only if we're not already on the restaurant page
+        if restaurant.omakase_url not in page.url:
+            await page.goto(restaurant.omakase_url)
+            await page.wait_for_load_state("networkidle")
+
+        # Try known selectors for cancellation policy sections
+        policy_selectors = [
+            '[class*="cancel"]',
+            '[class*="policy"]',
+            '[id*="cancel"]',
+            '[id*="policy"]',
+            'section:has-text("キャンセル")',
+            'div:has-text("キャンセルポリシー")',
+        ]
+
+        for selector in policy_selectors:
+            el = page.locator(selector)
+            if await el.count() > 0:
+                text = await el.first.text_content()
+                if text and "キャンセル" in text:
+                    policy = text.strip()
+                    # Trim to reasonable length
+                    if len(policy) > 500:
+                        policy = policy[:500] + "..."
+                    logger.info("Found cancellation policy for %s", restaurant.name)
+                    return policy
+
+        # Fallback: search full page text for cancellation-related content
+        body_text = await page.locator("body").text_content() or ""
+
+        # Extract cancellation policy section from body text
+        cancel_patterns = [
+            # "キャンセルポリシー" section
+            r"(キャンセルポリシー[ー：:\s]*[^\n]*(?:\n[^\n]*){0,5})",
+            # "キャンセル料" details
+            r"(キャンセル料[^。]*。(?:[^。]*キャンセル[^。]*。)*)",
+            # "Cancel" in English
+            r"(Cancellation\s+Policy[:\s]*[^\n]*(?:\n[^\n]*){0,5})",
+            # Specific fee patterns like "前日50% 当日100%"
+            r"((?:前日|当日|(\d+)日前)[^。\n]*(?:キャンセル|%|円|fee)[^。\n]*)",
+        ]
+
+        for pattern in cancel_patterns:
+            m = re.search(pattern, body_text)
+            if m:
+                policy = m.group(1).strip()
+                if len(policy) > 500:
+                    policy = policy[:500] + "..."
+                logger.info("Found cancellation policy (regex) for %s", restaurant.name)
+                return policy
+
+        logger.info("No cancellation policy found for %s", restaurant.name)
+        return "キャンセルポリシー情報を取得できませんでした。Omakase のレストランページをご確認ください。"
+
     async def check_availability(
         self,
         restaurant: RestaurantTarget,
