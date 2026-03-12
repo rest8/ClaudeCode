@@ -1,12 +1,12 @@
 """Main orchestrator for Omakase auto-booking.
 
 Workflow:
-  1. Load configuration
-  2. Check Google Calendar for free slots
-  3. For each target restaurant, check Omakase for availability
-  4. If a matching slot is found (free in calendar + available on Omakase),
-     attempt to book it
-  5. Repeat at configured intervals, especially around reservation open times
+  1. Google Calendar check → identify days with free slots at preferred times
+  2. Merge with user-specified candidate dates
+  3. Omakase availability check → detect open time, check slots
+  4. Matching → candidate dates × Omakase slots → book immediately
+  5. Fast polling (0.5s) around per-restaurant reservation open times
+  6. Complete payment after securing a slot
 """
 
 import asyncio
@@ -17,7 +17,7 @@ from datetime import datetime, time, timedelta
 from pathlib import Path
 
 from .calendar_checker import get_available_dates
-from .config import Config
+from .config import Config, RestaurantTarget
 from .notifier import notify_failure, notify_success
 from .omakase_client import OmakaseClient, OmakaseBookingError
 
@@ -26,13 +26,63 @@ logger = logging.getLogger(__name__)
 # Track successful bookings to avoid duplicates
 _booked: set[tuple[str, str, str]] = set()  # (restaurant_url, date, time)
 
+# Cache detected open times per restaurant URL
+_open_times: dict[str, str] = {}  # restaurant_url -> "YYYY-MM-DDTHH:MM" or "HH:MM"
+
+
+def _build_candidate_dates(
+    config: Config,
+    restaurant: RestaurantTarget,
+) -> list[tuple[datetime, list[str]]]:
+    """Build list of candidate (date, times) from user config + Google Calendar.
+
+    Priority:
+      1. User-specified candidate_dates (always included)
+      2. Google Calendar free slots (if no candidate_dates, or as supplement)
+
+    Returns:
+        List of (date_datetime, matching_preferred_times).
+    """
+    candidates: dict[str, list[str]] = {}
+
+    # User-specified candidate dates
+    for date_str in restaurant.candidate_dates:
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            candidates[date_str] = list(restaurant.preferred_times)
+        except ValueError:
+            logger.warning("Invalid candidate date format: %s (expected YYYY-MM-DD)", date_str)
+
+    # Google Calendar free slots (supplement or primary source)
+    if not restaurant.candidate_dates:
+        try:
+            cal_available = get_available_dates(config, restaurant.preferred_times)
+            for cal_date, cal_times in cal_available:
+                date_str = cal_date.strftime("%Y-%m-%d")
+                if date_str not in candidates:
+                    candidates[date_str] = cal_times
+                else:
+                    # Merge times (calendar confirms those user-specified dates are free)
+                    for t in cal_times:
+                        if t not in candidates[date_str]:
+                            candidates[date_str].append(t)
+        except Exception:
+            logger.exception("Failed to check Google Calendar")
+
+    result = []
+    for date_str in sorted(candidates.keys()):
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        result.append((dt, candidates[date_str]))
+
+    return result
+
 
 async def try_book_restaurant(
     client: OmakaseClient,
-    restaurant,
-    calendar_available: list[tuple[datetime, list[str]]],
+    restaurant: RestaurantTarget,
+    candidate_dates: list[tuple[datetime, list[str]]],
 ) -> bool:
-    """Try to book a restaurant on any available date/time.
+    """Try to book a restaurant on any matching date/time.
 
     Returns True if a booking was made.
     """
@@ -47,8 +97,8 @@ async def try_book_restaurant(
         logger.info("No available slots on Omakase for %s", restaurant.name)
         return False
 
-    # Match Omakase slots with calendar availability
-    for cal_date, cal_times in calendar_available:
+    # Match Omakase slots with candidate dates
+    for cal_date, cal_times in candidate_dates:
         date_str = cal_date.strftime("%Y-%m-%d")
 
         for slot in omakase_slots:
@@ -58,7 +108,6 @@ async def try_book_restaurant(
             if not slot_date or not slot_time:
                 continue
 
-            # Check if this slot matches our calendar availability
             if slot_date != date_str:
                 continue
             if slot_time not in cal_times:
@@ -69,7 +118,7 @@ async def try_book_restaurant(
             if key in _booked:
                 continue
 
-            # Try to book!
+            # Try to book (includes payment)!
             logger.info(
                 "Match found! %s on %s at %s",
                 restaurant.name,
@@ -85,10 +134,58 @@ async def try_book_restaurant(
                     notify_success(restaurant.name, slot_date, slot_time)
                     return True
                 else:
-                    notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - booking failed")
+                    notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - booking/payment failed")
             except Exception:
                 logger.exception("Error booking %s", restaurant.name)
                 notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - exception")
+
+    return False
+
+
+async def detect_open_times(client: OmakaseClient, config: Config):
+    """Detect reservation open times for all target restaurants."""
+    for restaurant in config.target_restaurants:
+        if not restaurant.omakase_url:
+            continue
+        if restaurant.omakase_url in _open_times:
+            continue
+
+        try:
+            open_time = await client.detect_reservation_open_time(restaurant)
+            if open_time:
+                _open_times[restaurant.omakase_url] = open_time
+                logger.info(
+                    "Restaurant %s: reservation opens at %s",
+                    restaurant.name,
+                    open_time,
+                )
+        except Exception:
+            logger.exception("Failed to detect open time for %s", restaurant.name)
+
+
+def _is_near_any_open_time(config: Config) -> bool:
+    """Check if we're within the fast-polling window of any restaurant's open time."""
+    now = datetime.now()
+    window = timedelta(minutes=config.fast_poll_window_minutes)
+
+    for restaurant in config.target_restaurants:
+        url = restaurant.omakase_url
+        open_time_str = _open_times.get(url)
+
+        if open_time_str:
+            try:
+                if "T" in open_time_str:
+                    # Full datetime: "YYYY-MM-DDTHH:MM"
+                    open_dt = datetime.strptime(open_time_str, "%Y-%m-%dT%H:%M")
+                else:
+                    # Time only: "HH:MM" — assume today
+                    hour, minute = map(int, open_time_str.split(":"))
+                    open_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+                if abs((now - open_dt).total_seconds()) < window.total_seconds():
+                    return True
+            except ValueError:
+                continue
 
     return False
 
@@ -101,6 +198,9 @@ async def run_booking_cycle(config: Config):
     try:
         await client.start()
 
+        # Step 1: Detect reservation open times (cached after first detection)
+        await detect_open_times(client, config)
+
         for restaurant in config.target_restaurants:
             if not restaurant.omakase_url:
                 continue
@@ -108,46 +208,32 @@ async def run_booking_cycle(config: Config):
             # Handle lottery-based restaurants
             if restaurant.booking_mode == "lottery":
                 logger.info("Lottery mode for %s", restaurant.name)
-                # Check if we won a previous lottery
                 booking_url = await client.check_lottery_result(restaurant)
                 if booking_url:
-                    # We won! Get calendar availability and book
-                    try:
-                        calendar_available = get_available_dates(
-                            config, restaurant.preferred_times
-                        )
-                    except Exception:
-                        logger.exception("Failed to check calendar")
-                        continue
-                    if calendar_available:
-                        await try_book_restaurant(client, restaurant, calendar_available)
+                    candidate_dates = _build_candidate_dates(config, restaurant)
+                    if candidate_dates:
+                        await try_book_restaurant(client, restaurant, candidate_dates)
                 else:
-                    # Enter the lottery
                     await client.enter_lottery(restaurant)
                 continue
 
             # First-come-first-served mode
-            # Get calendar availability for this restaurant's preferred times
-            logger.info("Checking calendar for %s...", restaurant.name)
-            try:
-                calendar_available = get_available_dates(
-                    config, restaurant.preferred_times
-                )
-            except Exception:
-                logger.exception("Failed to check calendar")
-                continue
+            # Step 2: Build candidate dates (user-specified + calendar)
+            logger.info("Building candidate dates for %s...", restaurant.name)
+            candidate_dates = _build_candidate_dates(config, restaurant)
 
-            if not calendar_available:
-                logger.info("No free calendar slots for %s", restaurant.name)
+            if not candidate_dates:
+                logger.info("No candidate dates for %s", restaurant.name)
                 continue
 
             logger.info(
-                "%d available dates in calendar for %s",
-                len(calendar_available),
+                "%d candidate dates for %s",
+                len(candidate_dates),
                 restaurant.name,
             )
 
-            await try_book_restaurant(client, restaurant, calendar_available)
+            # Steps 3-6: Check Omakase, match, book, pay
+            await try_book_restaurant(client, restaurant, candidate_dates)
 
     except OmakaseBookingError:
         logger.exception("Omakase login/session error")
@@ -157,18 +243,10 @@ async def run_booking_cycle(config: Config):
     logger.info("Booking cycle complete.")
 
 
-def _is_near_open_time(config: Config, window_minutes: int = 5) -> bool:
-    """Check if we're within a window around the reservation open time."""
-    now = datetime.now()
-    hour, minute = map(int, config.reservation_open_time.split(":"))
-    open_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    return abs((now - open_time).total_seconds()) < window_minutes * 60
-
-
 async def run_scheduler(config: Config):
     """Main scheduling loop.
 
-    - Near the reservation open time: poll rapidly (every few seconds)
+    - Near a restaurant's reservation open time: poll rapidly (0.5s)
     - Otherwise: poll at the configured interval
     """
     logger.info("Omakase Auto-Booker started. Monitoring %d restaurants.", len(config.target_restaurants))
@@ -190,9 +268,9 @@ async def run_scheduler(config: Config):
             logger.exception("Unexpected error in booking cycle")
 
         # Determine next check interval
-        if _is_near_open_time(config):
-            interval = 5  # Rapid polling near open time
-            logger.info("Near reservation open time - rapid polling (5s)")
+        if _is_near_any_open_time(config):
+            interval = config.fast_poll_interval_seconds
+            logger.info("Near reservation open time - fast polling (%.1fs)", interval)
         else:
             interval = config.check_interval_seconds
             logger.info("Next check in %d seconds", interval)
@@ -239,8 +317,12 @@ def main():
     print("  アカウント停止のリスクがあります。")
     print()
     print(f"  Monitoring {len(config.target_restaurants)} restaurant(s)")
-    print(f"  Reservation open time: {config.reservation_open_time} JST")
-    print(f"  Check interval: {config.check_interval_seconds}s")
+    for r in config.target_restaurants:
+        mode = "lottery" if r.booking_mode == "lottery" else "first-come"
+        dates_info = f", dates: {r.candidate_dates}" if r.candidate_dates else ""
+        print(f"    - {r.name} ({mode}{dates_info})")
+    print(f"  Fast poll interval: {config.fast_poll_interval_seconds}s")
+    print(f"  Normal poll interval: {config.check_interval_seconds}s")
     print()
 
     asyncio.run(run_scheduler(config))

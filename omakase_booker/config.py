@@ -16,6 +16,8 @@ class RestaurantTarget:
     preferred_times: list[str] = field(default_factory=lambda: ["18:00", "19:00", "20:00"])
     course_keyword: str | None = None  # Keyword to match a specific course
     booking_mode: str = "first_come"  # "first_come" or "lottery"
+    # User-specified candidate dates (YYYY-MM-DD). If empty, use Google Calendar.
+    candidate_dates: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -38,7 +40,8 @@ class Config:
 
     # Scheduling
     check_interval_seconds: int = 30  # How often to poll for new slots
-    reservation_open_time: str = "10:00"  # When reservations typically open (JST)
+    fast_poll_interval_seconds: float = 0.5  # Interval during fast-polling near open time
+    fast_poll_window_minutes: int = 5  # Minutes before/after open time for fast polling
 
     # Browser
     headless: bool = True

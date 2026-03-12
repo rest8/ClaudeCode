@@ -17,7 +17,12 @@ min_free_hours: 3.0           # Minimum free time block (hours) needed in calend
 # --- Target Restaurants ---
 # Add restaurants you want to auto-book.
 # Find the URL from your Omakase restaurant page (e.g. https://omakase.in/r/xx123456).
+#
 # booking_mode: "first_come" (先着順) or "lottery" (抽選制)
+#
+# candidate_dates: User-specified dates (YYYY-MM-DD) to try booking.
+#   If omitted, dates are determined from Google Calendar free slots.
+#   If specified, these dates are used directly (calendar check skipped).
 target_restaurants:
   - name: "鮨 さいとう"
     omakase_url: "https://omakase.in/r/example123"
@@ -25,8 +30,12 @@ target_restaurants:
     preferred_times:
       - "18:00"
       - "19:00"
-    course_keyword: null    # Optional: keyword to select a specific course
+    course_keyword: null
     booking_mode: "first_come"
+    candidate_dates:              # Specific dates to try (optional)
+      - "2026-04-15"
+      - "2026-04-16"
+      - "2026-04-22"
 
   - name: "すきやばし次郎"
     omakase_url: "https://omakase.in/r/example456"
@@ -36,12 +45,13 @@ target_restaurants:
       - "18:00"
       - "19:00"
     course_keyword: null
-    booking_mode: "lottery"  # This restaurant uses the raffle system
+    booking_mode: "lottery"       # This restaurant uses the raffle system
 
 # --- Scheduling ---
-check_interval_seconds: 30    # Polling interval for new slot checks
-reservation_open_time: "10:00"  # JST time when reservations typically open
+check_interval_seconds: 30        # Normal polling interval (seconds)
+fast_poll_interval_seconds: 0.5   # Fast polling near reservation open time (seconds)
+fast_poll_window_minutes: 5       # Minutes before/after open time for fast polling
 
 # --- Browser ---
-headless: true                # Set false for debugging (shows browser window)
+headless: true                    # Set false for debugging (shows browser window)
 browser_timeout_ms: 30000

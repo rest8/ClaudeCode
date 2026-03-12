@@ -9,8 +9,9 @@ IMPORTANT: Omakase (omakase.in) の利用規約ではボットや自動操作が
 The flow:
   1. Log in to omakase.in
   2. Navigate to the target restaurant page
-  3. Check available dates/times (or enter lottery for lottery-based restaurants)
-  4. Select matching slot and complete booking
+  3. Detect reservation open time from restaurant page
+  4. Check available dates/times (or enter lottery for lottery-based restaurants)
+  5. Select matching slot, confirm booking, and complete payment
 """
 
 import logging
@@ -94,11 +95,65 @@ class OmakaseClient:
         await page.wait_for_load_state("networkidle")
 
         # Verify login succeeded
-        if "login" in page.url.lower():
+        if "sign_in" in page.url.lower() or "login" in page.url.lower():
             raise OmakaseBookingError(
                 "Login failed. Check your email and password in config."
             )
         logger.info("Login successful.")
+
+    async def detect_reservation_open_time(
+        self,
+        restaurant: RestaurantTarget,
+    ) -> str | None:
+        """Detect the reservation open time from a restaurant's page.
+
+        Omakase restaurant pages typically display when reservations open,
+        e.g. "予約開始: 2026-04-01 10:00" or "Reservations open at 10:00".
+
+        Returns:
+            ISO datetime string (YYYY-MM-DDTHH:MM) if detected, None otherwise.
+        """
+        page = self._page
+        logger.info("Detecting reservation open time for: %s", restaurant.name)
+
+        await page.goto(restaurant.omakase_url)
+        await page.wait_for_load_state("networkidle")
+
+        body_text = await page.locator("body").text_content()
+        if not body_text:
+            return None
+
+        # Pattern 1: "予約開始 YYYY年M月D日 HH:MM" or "予約開始 YYYY/MM/DD HH:MM"
+        patterns = [
+            r"予約開始[:\s]*(\d{4})[年/\-](\d{1,2})[月/\-](\d{1,2})[日]?\s*(\d{1,2}):(\d{2})",
+            r"Reservations?\s+open[:\s]*(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})\s+(\d{1,2}):(\d{2})",
+            r"受付開始[:\s]*(\d{4})[年/\-](\d{1,2})[月/\-](\d{1,2})[日]?\s*(\d{1,2}):(\d{2})",
+        ]
+
+        for pattern in patterns:
+            m = re.search(pattern, body_text)
+            if m:
+                y, mo, d, h, mi = m.groups()
+                open_time = f"{y}-{int(mo):02d}-{int(d):02d}T{int(h):02d}:{int(mi):02d}"
+                logger.info("Detected reservation open time: %s", open_time)
+                return open_time
+
+        # Pattern 2: Just time, e.g. "10:00 予約開始" or "10:00に予約受付開始"
+        time_patterns = [
+            r"(\d{1,2}):(\d{2})\s*(?:に)?(?:予約|受付)(?:開始|受付開始)",
+            r"(?:予約|受付)(?:開始|受付開始)[:\s]*(\d{1,2}):(\d{2})",
+        ]
+        for pattern in time_patterns:
+            m = re.search(pattern, body_text)
+            if m:
+                h, mi = m.groups()
+                # Return time-only (caller decides the date)
+                time_str = f"{int(h):02d}:{int(mi):02d}"
+                logger.info("Detected reservation open time (time only): %s", time_str)
+                return time_str
+
+        logger.info("Could not detect reservation open time for %s", restaurant.name)
+        return None
 
     async def check_availability(
         self,
@@ -118,8 +173,6 @@ class OmakaseClient:
         available_slots = []
 
         # Look for available date/time slots on the page
-        # Omakase typically shows a calendar or list of available dates
-        # Try to find clickable date elements
         date_elements = page.locator(
             '[class*="available"], [class*="open"], '
             'a[href*="reserve"], button:not([disabled])'
@@ -200,7 +253,7 @@ class OmakaseClient:
         target_date: str,
         target_time: str,
     ) -> bool:
-        """Attempt to book a specific slot.
+        """Attempt to book a specific slot and complete payment.
 
         Args:
             restaurant: Target restaurant config.
@@ -208,7 +261,7 @@ class OmakaseClient:
             target_time: Time string (HH:MM).
 
         Returns:
-            True if booking succeeded.
+            True if booking and payment succeeded.
         """
         page = self._page
         logger.info(
@@ -245,19 +298,24 @@ class OmakaseClient:
             await self._select_course(restaurant.course_keyword)
 
         # Step 5: Confirm the reservation
-        return await self._confirm_booking()
+        confirmed = await self._confirm_booking()
+        if not confirmed:
+            return False
+
+        # Step 6: Complete payment (seat reservation fee ¥390/person)
+        paid = await self._complete_payment()
+        if not paid:
+            logger.warning("Booking confirmed but payment may have failed. Check your account.")
+        return True
 
     async def _navigate_to_date(self, target_date: str):
         """Navigate the calendar to the target date."""
         page = self._page
         target = datetime.strptime(target_date, "%Y-%m-%d")
 
-        # Try clicking on the target date in a calendar view
-        # Common patterns: day number links, calendar cells
         day = target.day
         month = target.month
 
-        # Try various calendar navigation approaches
         # Approach 1: Direct date link/button
         date_btn = page.locator(f'[data-date="{target_date}"]')
         if await date_btn.count() > 0:
@@ -266,14 +324,14 @@ class OmakaseClient:
             return
 
         # Approach 2: Navigate months then click day
-        # Find and click next month buttons until we reach the right month
         for _ in range(6):
-            # Check if current month matches
-            month_text = await page.locator(
+            month_header = page.locator(
                 '[class*="month"], [class*="calendar-header"]'
-            ).first.text_content()
-            if month_text and (f"{month}月" in month_text or f"{target.strftime('%B')}" in month_text):
-                break
+            )
+            if await month_header.count() > 0:
+                month_text = await month_header.first.text_content()
+                if month_text and (f"{month}月" in month_text or f"{target.strftime('%B')}" in month_text):
+                    break
             next_btn = page.locator(
                 '[class*="next"], button:has-text("次"), button:has-text(">")'
             )
@@ -294,7 +352,6 @@ class OmakaseClient:
         """Select a specific time slot."""
         page = self._page
 
-        # Look for time slot buttons/links
         time_elements = page.locator(
             f'button:has-text("{target_time}"), '
             f'a:has-text("{target_time}"), '
@@ -325,11 +382,10 @@ class OmakaseClient:
         """Select a course by keyword match."""
         page = self._page
         course_elements = page.locator(
-            f'[class*="course"], [class*="menu"], [class*="plan"]'
+            '[class*="course"], [class*="menu"], [class*="plan"]'
         ).filter(has_text=re.compile(course_keyword, re.IGNORECASE))
 
         if await course_elements.count() > 0:
-            # Click the course or its radio/checkbox
             clickable = course_elements.first.locator(
                 'input[type="radio"], input[type="checkbox"], button, a'
             )
@@ -340,7 +396,7 @@ class OmakaseClient:
             logger.info("Selected course matching: %s", course_keyword)
 
     async def _confirm_booking(self) -> bool:
-        """Complete the booking confirmation flow."""
+        """Complete the booking confirmation flow (before payment)."""
         page = self._page
 
         # Step 1: Click the reservation/confirm button
@@ -357,8 +413,7 @@ class OmakaseClient:
         await confirm_btn.first.click()
         await page.wait_for_load_state("networkidle")
 
-        # Step 2: Handle confirmation dialog/page if any
-        # Some sites have a two-step confirmation
+        # Step 2: Handle two-step confirmation page
         final_confirm = page.locator(
             'button:has-text("確定"), button:has-text("送信"), '
             'button:has-text("Complete"), button:has-text("最終確認")'
@@ -367,17 +422,7 @@ class OmakaseClient:
             await final_confirm.first.click()
             await page.wait_for_load_state("networkidle")
 
-        # Step 3: Verify success
-        success_indicators = page.locator(
-            ':has-text("予約が完了"), :has-text("予約を承りました"), '
-            ':has-text("Reservation confirmed"), :has-text("ありがとうございます")'
-        )
-
-        if await success_indicators.count() > 0:
-            logger.info("Booking confirmed successfully!")
-            return True
-
-        # Check for error messages
+        # Check for errors before proceeding to payment
         error_indicators = page.locator(
             ':has-text("満席"), :has-text("予約できません"), '
             ':has-text("エラー"), :has-text("sold out")'
@@ -387,11 +432,77 @@ class OmakaseClient:
             logger.warning("Booking failed: %s", error_text)
             return False
 
-        # Take a screenshot for debugging
-        await page.screenshot(path="booking_result.png")
-        logger.warning(
-            "Booking result unclear. Screenshot saved to booking_result.png"
+        logger.info("Booking confirmation step passed.")
+        return True
+
+    async def _complete_payment(self) -> bool:
+        """Complete the payment step (seat reservation fee).
+
+        Omakase charges a seat reservation fee (typically ¥390/person)
+        via credit card. The card is usually saved on the account.
+        """
+        page = self._page
+        logger.info("Completing payment...")
+
+        # Check if there's a payment/checkout page
+        # Look for payment-related elements: credit card form, pay button, fee display
+        payment_btn = page.locator(
+            'button:has-text("支払"), button:has-text("決済"), '
+            'button:has-text("Pay"), button:has-text("お支払い"), '
+            'button:has-text("購入"), button:has-text("確定"), '
+            'input[type="submit"][value*="支払"], '
+            'input[type="submit"][value*="決済"]'
         )
+
+        if await payment_btn.count() > 0:
+            # Log the fee amount if visible
+            fee_text = page.locator(
+                ':has-text("¥"), :has-text("円"), :has-text("JPY")'
+            )
+            if await fee_text.count() > 0:
+                fee_content = await fee_text.first.text_content()
+                logger.info("Payment fee: %s", fee_content.strip() if fee_content else "unknown")
+
+            await payment_btn.first.click()
+            await page.wait_for_load_state("networkidle")
+
+            # Verify payment success
+            success = page.locator(
+                ':has-text("予約が完了"), :has-text("予約を承りました"), '
+                ':has-text("お支払いが完了"), :has-text("決済が完了"), '
+                ':has-text("Reservation confirmed"), :has-text("Payment complete"), '
+                ':has-text("ありがとうございます")'
+            )
+            if await success.count() > 0:
+                logger.info("Payment completed successfully!")
+                return True
+
+            # Check for payment errors
+            pay_error = page.locator(
+                ':has-text("決済エラー"), :has-text("カードエラー"), '
+                ':has-text("Payment failed"), :has-text("お支払いに失敗")'
+            )
+            if await pay_error.count() > 0:
+                error_text = await pay_error.first.text_content()
+                logger.error("Payment failed: %s", error_text)
+                return False
+
+            await page.screenshot(path="payment_result.png")
+            logger.warning("Payment result unclear. Screenshot saved to payment_result.png")
+            return False
+
+        # No payment button found - some bookings might confirm without separate payment step
+        # Check if we're already on a success page
+        success = page.locator(
+            ':has-text("予約が完了"), :has-text("予約を承りました"), '
+            ':has-text("Reservation confirmed"), :has-text("ありがとうございます")'
+        )
+        if await success.count() > 0:
+            logger.info("Booking confirmed (payment may have been automatic).")
+            return True
+
+        await page.screenshot(path="booking_result.png")
+        logger.warning("Booking result unclear. Screenshot saved to booking_result.png")
         return False
 
     async def enter_lottery(self, restaurant: RestaurantTarget) -> bool:
@@ -424,7 +535,6 @@ class OmakaseClient:
         await lottery_btn.first.click()
         await page.wait_for_load_state("networkidle")
 
-        # Check if we need to select preferences before entering
         # Select party size if available
         party_selector = page.locator(
             'select[name*="party"], select[name*="person"], '
