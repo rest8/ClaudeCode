@@ -20,7 +20,7 @@ from datetime import datetime
 
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 
-from .config import Config, RestaurantTarget
+from .config import Config, RestaurantInfo, RestaurantTarget
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +220,332 @@ class OmakaseClient:
 
         logger.info("No cancellation policy found for %s", restaurant.name)
         return "キャンセルポリシー情報を取得できませんでした。Omakase のレストランページをご確認ください。"
+
+    # ── Restaurant Browsing / Discovery ──────────────────────
+
+    async def discover_browse_urls(self) -> dict[str, list[dict[str, str]]]:
+        """Discover available region and genre browsing URLs from the Omakase site.
+
+        Returns:
+            Dict with keys "areas" and "genres", each a list of {name, url} dicts.
+        """
+        page = self._page
+        logger.info("Discovering browse URLs from Omakase top page...")
+
+        await page.goto(OMAKASE_BASE_URL)
+        await page.wait_for_load_state("networkidle")
+
+        result: dict[str, list[dict[str, str]]] = {"areas": [], "genres": []}
+
+        # Find all links in the page
+        all_links = page.locator("a[href]")
+        count = await all_links.count()
+
+        for i in range(count):
+            el = all_links.nth(i)
+            href = await el.get_attribute("href") or ""
+            text = (await el.text_content() or "").strip()
+            if not text or not href:
+                continue
+
+            # Normalize URL
+            if href.startswith("/"):
+                href = f"{OMAKASE_BASE_URL}{href}"
+
+            # Area links: /ja/area/*, /area/*, or links with area-like patterns
+            if "/area/" in href or "/region/" in href or "/エリア/" in href:
+                result["areas"].append({"name": text, "url": href})
+            # Genre links: /ja/genre/*, /genre/*, /cuisine/*
+            elif "/genre/" in href or "/cuisine/" in href or "/ジャンル/" in href:
+                result["genres"].append({"name": text, "url": href})
+
+        # Fallback: try to find navigation/category sections
+        if not result["areas"] and not result["genres"]:
+            nav_links = page.locator(
+                'nav a[href], [class*="category"] a[href], '
+                '[class*="area"] a[href], [class*="genre"] a[href], '
+                '[class*="nav"] a[href]'
+            )
+            nav_count = await nav_links.count()
+            for i in range(nav_count):
+                el = nav_links.nth(i)
+                href = await el.get_attribute("href") or ""
+                text = (await el.text_content() or "").strip()
+                if not text or not href:
+                    continue
+                if href.startswith("/"):
+                    href = f"{OMAKASE_BASE_URL}{href}"
+                # Heuristic: Japanese region names
+                area_keywords = ["東京", "大阪", "京都", "名古屋", "福岡", "北海道", "神戸",
+                                 "横浜", "銀座", "六本木", "渋谷", "新宿", "赤坂", "恵比寿",
+                                 "麻布", "青山", "西麻布", "表参道", "広尾"]
+                genre_keywords = ["鮨", "寿司", "天ぷら", "天麩羅", "懐石", "割烹", "焼鳥",
+                                  "焼肉", "フレンチ", "イタリアン", "中華", "和食", "鉄板焼",
+                                  "うなぎ", "蕎麦", "日本料理", "Sushi", "Tempura"]
+                if any(k in text for k in area_keywords):
+                    result["areas"].append({"name": text, "url": href})
+                elif any(k in text for k in genre_keywords):
+                    result["genres"].append({"name": text, "url": href})
+
+        # Deduplicate
+        for key in ("areas", "genres"):
+            seen = set()
+            deduped = []
+            for item in result[key]:
+                if item["url"] not in seen:
+                    seen.add(item["url"])
+                    deduped.append(item)
+            result[key] = deduped
+
+        logger.info("Found %d areas, %d genres", len(result["areas"]), len(result["genres"]))
+        return result
+
+    async def browse_restaurants(self, listing_url: str) -> list[RestaurantInfo]:
+        """Browse a restaurant listing page and extract restaurant info.
+
+        Args:
+            listing_url: URL of the listing page (area or genre page).
+
+        Returns:
+            List of RestaurantInfo for restaurants found on the page.
+        """
+        page = self._page
+        logger.info("Browsing restaurants at: %s", listing_url)
+
+        await page.goto(listing_url)
+        await page.wait_for_load_state("networkidle")
+
+        restaurants: list[RestaurantInfo] = []
+
+        # Strategy 1: Look for restaurant cards/links with /r/ pattern
+        restaurant_links = page.locator('a[href*="/r/"]')
+        count = await restaurant_links.count()
+        logger.info("Found %d restaurant links", count)
+
+        seen_urls: set[str] = set()
+        for i in range(count):
+            el = restaurant_links.nth(i)
+            href = await el.get_attribute("href") or ""
+            if not href:
+                continue
+            if href.startswith("/"):
+                href = f"{OMAKASE_BASE_URL}{href}"
+            # Only include actual restaurant pages
+            if "/r/" not in href:
+                continue
+            # Deduplicate by URL
+            base_url = href.split("?")[0].rstrip("/")
+            if base_url in seen_urls:
+                continue
+            seen_urls.add(base_url)
+
+            # Try to extract info from the card/surrounding context
+            name = ""
+            # First try: the link text itself
+            link_text = (await el.text_content() or "").strip()
+
+            # Try to find the parent card element
+            parent = el
+            card = None
+            for _ in range(4):  # Walk up the DOM tree
+                parent = parent.locator("..")
+                parent_class = await parent.get_attribute("class") or ""
+                parent_tag = await parent.evaluate("el => el.tagName.toLowerCase()")
+                if any(kw in parent_class.lower() for kw in ("card", "item", "restaurant", "shop", "store")):
+                    card = parent
+                    break
+                if parent_tag in ("li", "article"):
+                    card = parent
+                    break
+
+            if card:
+                # Extract name from heading inside card
+                heading = card.locator("h1, h2, h3, h4, h5, h6, [class*='name'], [class*='title']")
+                if await heading.count() > 0:
+                    name = (await heading.first.text_content() or "").strip()
+
+                # Extract price
+                price_el = card.locator("[class*='price'], :has-text('¥'), :has-text('円')")
+                price = ""
+                if await price_el.count() > 0:
+                    price = (await price_el.first.text_content() or "").strip()
+
+                # Extract area/genre from card metadata
+                meta_el = card.locator("[class*='area'], [class*='region'], [class*='genre'], [class*='category'], [class*='tag']")
+                area = ""
+                genre = ""
+                for j in range(min(await meta_el.count(), 5)):
+                    meta_text = (await meta_el.nth(j).text_content() or "").strip()
+                    meta_class = (await meta_el.nth(j).get_attribute("class") or "").lower()
+                    if "area" in meta_class or "region" in meta_class:
+                        area = meta_text
+                    elif "genre" in meta_class or "category" in meta_class:
+                        genre = meta_text
+
+                # Extract image
+                img_el = card.locator("img")
+                image_url = ""
+                if await img_el.count() > 0:
+                    image_url = await img_el.first.get_attribute("src") or ""
+                    if image_url.startswith("/"):
+                        image_url = f"{OMAKASE_BASE_URL}{image_url}"
+
+                # Extract description
+                desc_el = card.locator("[class*='desc'], [class*='text'], p")
+                description = ""
+                if await desc_el.count() > 0:
+                    description = (await desc_el.first.text_content() or "").strip()[:200]
+
+                restaurants.append(RestaurantInfo(
+                    name=name or link_text or base_url.split("/r/")[-1],
+                    url=base_url,
+                    area=area,
+                    genre=genre,
+                    price_range=price,
+                    image_url=image_url,
+                    description=description,
+                ))
+            else:
+                # Minimal info from just the link
+                restaurants.append(RestaurantInfo(
+                    name=link_text or base_url.split("/r/")[-1],
+                    url=base_url,
+                ))
+
+        # If no /r/ links found, try broader approach
+        if not restaurants:
+            logger.info("No /r/ links found, trying broader search...")
+            cards = page.locator(
+                '[class*="restaurant"], [class*="shop"], [class*="store"], '
+                '[class*="card"], article, [class*="item"]'
+            )
+            card_count = await cards.count()
+            for i in range(min(card_count, 50)):
+                card = cards.nth(i)
+                link = card.locator("a[href]").first
+                if await link.count() == 0:
+                    continue
+                href = await link.get_attribute("href") or ""
+                if href.startswith("/"):
+                    href = f"{OMAKASE_BASE_URL}{href}"
+                if href in seen_urls:
+                    continue
+                seen_urls.add(href)
+
+                heading = card.locator("h1, h2, h3, h4, h5, h6")
+                name = ""
+                if await heading.count() > 0:
+                    name = (await heading.first.text_content() or "").strip()
+
+                if name:
+                    restaurants.append(RestaurantInfo(name=name, url=href))
+
+        # Handle pagination - try to load more
+        next_page = page.locator(
+            'a:has-text("次"), a:has-text("次へ"), a:has-text("Next"), '
+            '[class*="next"], [rel="next"]'
+        )
+        has_more = await next_page.count() > 0
+
+        logger.info(
+            "Found %d restaurants on page (has_more=%s)",
+            len(restaurants), has_more,
+        )
+        return restaurants
+
+    async def browse_restaurants_all_pages(
+        self, listing_url: str, max_pages: int = 10
+    ) -> list[RestaurantInfo]:
+        """Browse all pages of a restaurant listing.
+
+        Args:
+            listing_url: Starting URL of the listing.
+            max_pages: Maximum number of pages to fetch.
+
+        Returns:
+            All restaurants found across pages.
+        """
+        all_restaurants: list[RestaurantInfo] = []
+        current_url = listing_url
+        seen_urls: set[str] = set()
+
+        for page_num in range(max_pages):
+            page = self._page
+            logger.info("Browsing page %d: %s", page_num + 1, current_url)
+
+            restaurants = await self.browse_restaurants(current_url)
+            new_count = 0
+            for r in restaurants:
+                if r.url not in seen_urls:
+                    seen_urls.add(r.url)
+                    all_restaurants.append(r)
+                    new_count += 1
+
+            if new_count == 0:
+                break
+
+            # Try to find next page link
+            next_link = page.locator(
+                'a:has-text("次"), a:has-text("次へ"), a:has-text("Next"), '
+                '[class*="next"]:not([class*="disabled"]), [rel="next"]'
+            )
+            if await next_link.count() == 0:
+                break
+
+            next_href = await next_link.first.get_attribute("href")
+            if not next_href:
+                break
+            if next_href.startswith("/"):
+                next_href = f"{OMAKASE_BASE_URL}{next_href}"
+            current_url = next_href
+
+        logger.info("Total restaurants found: %d across %d pages", len(all_restaurants), page_num + 1)
+        return all_restaurants
+
+    async def search_restaurants(self, query: str) -> list[RestaurantInfo]:
+        """Search for restaurants on Omakase by keyword.
+
+        Args:
+            query: Search keyword (restaurant name, area, cuisine, etc.)
+
+        Returns:
+            List of matching restaurants.
+        """
+        page = self._page
+        logger.info("Searching restaurants for: %s", query)
+
+        await page.goto(OMAKASE_BASE_URL)
+        await page.wait_for_load_state("networkidle")
+
+        # Try to find and use search input
+        search_input = page.locator(
+            'input[type="search"], input[name*="search"], input[name*="q"], '
+            'input[placeholder*="検索"], input[placeholder*="Search"], '
+            'input[class*="search"]'
+        )
+
+        if await search_input.count() > 0:
+            await search_input.first.fill(query)
+            # Submit search
+            await search_input.first.press("Enter")
+            await page.wait_for_load_state("networkidle")
+            return await self.browse_restaurants(page.url)
+
+        # Fallback: try URL-based search
+        search_urls = [
+            f"{OMAKASE_BASE_URL}/search?q={query}",
+            f"{OMAKASE_BASE_URL}/ja/search?q={query}",
+            f"{OMAKASE_BASE_URL}/restaurants?q={query}",
+        ]
+        for url in search_urls:
+            await page.goto(url)
+            await page.wait_for_load_state("networkidle")
+            results = await self.browse_restaurants(page.url)
+            if results:
+                return results
+
+        logger.info("No search results found for: %s", query)
+        return []
 
     async def check_availability(
         self,

@@ -286,10 +286,14 @@ def _is_near_any_open_time(config: Config) -> bool:
     return False
 
 
-async def run_booking_cycle(config: Config):
-    """Run one complete booking cycle for all restaurants."""
+async def run_booking_cycle(config: Config) -> bool:
+    """Run one complete booking cycle for all restaurants.
+
+    Returns True if at least one booking was made.
+    """
     logger.info("Starting booking cycle at %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+    any_booked = False
     client = OmakaseClient(config)
     try:
         await client.start()
@@ -308,7 +312,8 @@ async def run_booking_cycle(config: Config):
                 if booking_url:
                     candidate_dates = _build_candidate_dates(config, restaurant)
                     if candidate_dates:
-                        await try_book_restaurant(client, restaurant, candidate_dates)
+                        if await try_book_restaurant(client, restaurant, candidate_dates):
+                            any_booked = True
                 else:
                     await client.enter_lottery(restaurant)
                 continue
@@ -329,25 +334,33 @@ async def run_booking_cycle(config: Config):
             )
 
             # Steps 3-6: Check Omakase, match, book, pay
-            await try_book_restaurant(client, restaurant, candidate_dates)
+            if await try_book_restaurant(client, restaurant, candidate_dates):
+                any_booked = True
 
     except OmakaseBookingError:
         logger.exception("Omakase login/session error")
     finally:
         await client.close()
 
-    logger.info("Booking cycle complete.")
+    logger.info("Booking cycle complete. Booked: %s", any_booked)
+    return any_booked
 
 
 async def run_scheduler(config: Config):
     """Main scheduling loop.
 
+    In continuous mode (default), keeps running indefinitely to catch cancellations.
     - Near a restaurant's reservation open time: poll rapidly (0.5s)
     - Otherwise: poll at the configured interval
+    - After all restaurants have been booked once, switch to cancellation monitoring interval
     """
     global _current_config
     _current_config = config
-    logger.info("Omakase Auto-Booker started. Monitoring %d restaurants.", len(config.target_restaurants))
+    mode_label = "常時監視" if config.continuous_mode else "通常"
+    logger.info(
+        "Omakase Auto-Booker started (%s). Monitoring %d restaurants.",
+        mode_label, len(config.target_restaurants),
+    )
 
     # Handle graceful shutdown
     shutdown = asyncio.Event()
@@ -359,9 +372,16 @@ async def run_scheduler(config: Config):
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
+    cycle = 0
     while not shutdown.is_set():
+        cycle += 1
+        logger.info("=== Cycle %d ===", cycle)
         try:
-            await run_booking_cycle(config)
+            booked = await run_booking_cycle(config)
+            # In non-continuous mode, stop if something was booked
+            if booked and not config.continuous_mode:
+                logger.info("Booking successful, exiting (non-continuous mode).")
+                break
         except Exception:
             logger.exception("Unexpected error in booking cycle")
 
@@ -370,8 +390,13 @@ async def run_scheduler(config: Config):
             interval = config.fast_poll_interval_seconds
             logger.info("Near reservation open time - fast polling (%.1fs)", interval)
         else:
-            interval = config.check_interval_seconds
-            logger.info("Next check in %d seconds", interval)
+            # In continuous mode, use cancellation check interval for background monitoring
+            if config.continuous_mode:
+                interval = config.cancellation_check_interval_seconds
+                logger.info("Cancellation monitoring - next check in %ds", interval)
+            else:
+                interval = config.check_interval_seconds
+                logger.info("Next check in %d seconds", interval)
 
         try:
             await asyncio.wait_for(shutdown.wait(), timeout=interval)
@@ -414,13 +439,18 @@ def main():
     print("  本ツールの使用は自己責任です。")
     print("  アカウント停止のリスクがあります。")
     print()
+    mode_label = "常時監視 (キャンセル待ち対応)" if config.continuous_mode else "通常"
+    print(f"  モード: {mode_label}")
     print(f"  Monitoring {len(config.target_restaurants)} restaurant(s)")
     for r in config.target_restaurants:
-        mode = "lottery" if r.booking_mode == "lottery" else "first-come"
+        bmode = "lottery" if r.booking_mode == "lottery" else "first-come"
         dates_info = f", dates: {r.candidate_dates}" if r.candidate_dates else ""
-        print(f"    - {r.name} ({mode}{dates_info})")
+        cancel = ", キャンセル待ち" if r.watch_cancellations else ""
+        print(f"    - {r.name} ({bmode}{dates_info}{cancel})")
     print(f"  Fast poll interval: {config.fast_poll_interval_seconds}s")
     print(f"  Normal poll interval: {config.check_interval_seconds}s")
+    if config.continuous_mode:
+        print(f"  Cancellation check interval: {config.cancellation_check_interval_seconds}s")
     print()
 
     asyncio.run(run_scheduler(config))

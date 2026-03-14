@@ -15,6 +15,7 @@ from ..config import Config, RestaurantTarget
 from ..calendar_checker import get_events_for_range, create_booking_event
 from ..approval import request_approval, APPROVED, REJECTED, PENDING
 from ..omakase_client import OmakaseClient, OmakaseBookingError
+from .browser import RestaurantBrowserDialog
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class OmakaseApp:
         self._candidate_dates: set[date] = set()
         self._gcal_events: list[dict] = []
         self._booked_dates: set[date] = set()
+        self._booked_keys: set[tuple[str, str, str]] = set()  # (url, date, time)
         self._booking_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
@@ -119,16 +121,41 @@ class OmakaseApp:
         frame = ttk.LabelFrame(parent, text="レストラン", padding=10, width=350)
         frame.pack(fill=X, pady=(0, 10))
         frame.pack_propagate(False)
-        frame.configure(height=180)
+        frame.configure(height=220)
 
         self.restaurant_listbox = tk.Listbox(
             frame,
             font=("Yu Gothic UI", 10),
-            selectmode=tk.SINGLE,
+            selectmode=tk.EXTENDED,
             height=5,
         )
         self.restaurant_listbox.pack(fill=BOTH, expand=True)
         self.restaurant_listbox.bind("<<ListboxSelect>>", self._on_restaurant_select)
+
+        btn_row = ttk.Frame(frame)
+        btn_row.pack(fill=X, pady=(5, 0))
+
+        ttk.Button(
+            btn_row, text="検索して追加",
+            command=self._open_browser,
+            bootstyle="info-outline",
+            width=12,
+        ).pack(side=LEFT, padx=(0, 5))
+
+        ttk.Button(
+            btn_row, text="削除",
+            command=self._remove_restaurant,
+            bootstyle="danger-outline",
+            width=6,
+        ).pack(side=LEFT)
+
+        # Continuous mode toggle
+        self.continuous_var = tk.BooleanVar(value=self.config.continuous_mode)
+        ttk.Checkbutton(
+            btn_row, text="常時監視",
+            variable=self.continuous_var,
+            bootstyle="round-toggle",
+        ).pack(side=RIGHT)
 
     def _build_candidate_panel(self, parent):
         """Build the candidate dates display panel."""
@@ -317,6 +344,31 @@ class OmakaseApp:
         """Handle restaurant selection change."""
         pass
 
+    def _open_browser(self):
+        """Open the restaurant browser dialog."""
+        browser = RestaurantBrowserDialog(self.root, self.config)
+        self.root.wait_window(browser.dialog)
+
+        new_restaurants = browser.get_selected_restaurants()
+        if new_restaurants:
+            for r in new_restaurants:
+                if not any(t.omakase_url == r.omakase_url for t in self.config.target_restaurants):
+                    self.config.target_restaurants.append(r)
+            self._load_restaurants()
+            self._log(f"{len(new_restaurants)} 件のレストランを追加しました")
+
+    def _remove_restaurant(self):
+        """Remove selected restaurant(s) from the target list."""
+        sel = self.restaurant_listbox.curselection()
+        if not sel:
+            return
+        # Remove in reverse order to preserve indices
+        for idx in reversed(sel):
+            if idx < len(self.config.target_restaurants):
+                removed = self.config.target_restaurants.pop(idx)
+                self._log(f"「{removed.name}」を削除しました")
+        self._load_restaurants()
+
     def _refresh_candidate_list(self):
         """Update the candidate dates listbox."""
         self.candidate_listbox.delete(0, tk.END)
@@ -348,19 +400,28 @@ class OmakaseApp:
 
     def _start_booking(self):
         """Start the booking process in a background thread."""
-        restaurant = self._get_selected_restaurant()
-        if not restaurant:
-            messagebox.showwarning("選択エラー", "レストランを選択してください")
-            return
+        if self.continuous_var.get():
+            # Continuous mode: monitor all restaurants
+            if not self.config.target_restaurants:
+                messagebox.showwarning("選択エラー", "レストランを追加してください")
+                return
+            targets = list(self.config.target_restaurants)
+        else:
+            # Single restaurant mode
+            restaurant = self._get_selected_restaurant()
+            if not restaurant:
+                messagebox.showwarning("選択エラー", "レストランを選択してください")
+                return
+            targets = [restaurant]
 
         if not self._candidate_dates:
             messagebox.showwarning("候補日なし", "カレンダーから予約候補日を選択してください")
             return
 
-        # Update restaurant's candidate_dates from GUI selection
-        restaurant.candidate_dates = [
-            d.strftime("%Y-%m-%d") for d in sorted(self._candidate_dates)
-        ]
+        # Update candidate_dates for all targets
+        date_strs = [d.strftime("%Y-%m-%d") for d in sorted(self._candidate_dates)]
+        for t in targets:
+            t.candidate_dates = list(date_strs)
 
         self.start_btn.configure(state=DISABLED)
         self.stop_btn.configure(state=NORMAL)
@@ -368,8 +429,8 @@ class OmakaseApp:
         self._stop_event.clear()
 
         self._booking_thread = threading.Thread(
-            target=self._booking_worker,
-            args=(restaurant,),
+            target=self._booking_worker_multi,
+            args=(targets,),
             daemon=True,
         )
         self._booking_thread.start()
@@ -380,12 +441,12 @@ class OmakaseApp:
         self._update_status("停止中...")
         self._log("予約処理を停止中...")
 
-    def _booking_worker(self, restaurant: RestaurantTarget):
-        """Background worker that runs the booking loop."""
+    def _booking_worker_multi(self, targets: list[RestaurantTarget]):
+        """Background worker that runs the booking loop for multiple restaurants."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(self._booking_loop(restaurant))
+            loop.run_until_complete(self._booking_loop_multi(targets))
         except Exception as e:
             self._log(f"エラー: {e}")
             logger.exception("Booking worker error")
@@ -393,49 +454,66 @@ class OmakaseApp:
             loop.close()
             self.root.after(0, self._booking_finished)
 
-    async def _booking_loop(self, restaurant: RestaurantTarget):
-        """Async booking loop with fast polling support."""
+    async def _booking_loop_multi(self, targets: list[RestaurantTarget]):
+        """Async booking loop that monitors multiple restaurants continuously."""
         self._update_status("ログイン中...")
-        self._log(f"予約開始: {restaurant.name}")
+        continuous = self.continuous_var.get()
+        mode_label = "常時監視" if continuous else "通常"
+        self._log(f"予約開始 ({mode_label}): {len(targets)} 件のレストラン")
 
         client = OmakaseClient(self.config)
         try:
             await client.start()
             self._log("ログイン成功")
 
-            # Detect reservation open time
-            self._update_status("予約開始時刻を検出中...")
-            open_time = await client.detect_reservation_open_time(restaurant)
-            if open_time:
-                self._log(f"予約開始時刻: {open_time}")
-            else:
-                self._log("予約開始時刻を検出できませんでした (通常ポーリングで監視)")
+            # Detect open times & scrape policies for all targets
+            open_times: dict[str, str | None] = {}
+            policies: dict[str, str] = {}
 
-            # Scrape cancellation policy for approval card
-            self._update_status("キャンセルポリシーを取得中...")
-            cancellation_policy = await client.scrape_cancellation_policy(restaurant)
-            self._log(f"キャンセルポリシー: {cancellation_policy[:80]}..."
-                       if len(cancellation_policy) > 80 else
-                       f"キャンセルポリシー: {cancellation_policy}")
+            for restaurant in targets:
+                if self._stop_event.is_set():
+                    break
+                self._update_status(f"情報取得中: {restaurant.name}")
+                try:
+                    ot = await client.detect_reservation_open_time(restaurant)
+                    open_times[restaurant.omakase_url] = ot
+                    if ot:
+                        self._log(f"  {restaurant.name}: 予約開始 {ot}")
+                except Exception:
+                    logger.exception("Failed to detect open time for %s", restaurant.name)
+
+                try:
+                    pol = await client.scrape_cancellation_policy(restaurant)
+                    policies[restaurant.omakase_url] = pol
+                except Exception:
+                    logger.exception("Failed to scrape policy for %s", restaurant.name)
 
             attempt = 0
             while not self._stop_event.is_set():
                 attempt += 1
-                self._update_status(f"空き枠確認中... (試行 {attempt})")
-                self._log(f"--- 試行 {attempt} ---")
+                self._update_status(f"空き枠確認中... (サイクル {attempt})")
+                self._log(f"--- サイクル {attempt} ---")
 
-                # Check availability
-                try:
-                    slots = await client.check_availability(restaurant)
-                except Exception as e:
-                    self._log(f"空き確認エラー: {e}")
-                    await asyncio.sleep(self.config.check_interval_seconds)
-                    continue
+                booked_this_cycle = False
 
-                if not slots:
-                    self._log("空き枠なし")
-                else:
-                    self._log(f"{len(slots)} 件の空き枠を発見")
+                for restaurant in targets:
+                    if self._stop_event.is_set():
+                        break
+
+                    self._log(f"  [{restaurant.name}] 確認中...")
+
+                    # Check availability
+                    try:
+                        slots = await client.check_availability(restaurant)
+                    except Exception as e:
+                        self._log(f"  [{restaurant.name}] エラー: {e}")
+                        continue
+
+                    if not slots:
+                        self._log(f"  [{restaurant.name}] 空き枠なし")
+                        continue
+
+                    self._log(f"  [{restaurant.name}] {len(slots)} 件の空き枠")
 
                     # Try to match and book
                     for d in sorted(self._candidate_dates):
@@ -450,53 +528,70 @@ class OmakaseApp:
                             if slot_time not in restaurant.preferred_times:
                                 continue
 
-                            self._log(f"マッチ! {date_str} {slot_time} - 予約確保中...")
-                            self._update_status(f"予約確保中: {date_str} {slot_time}")
+                            # Skip already booked
+                            key = (restaurant.omakase_url, slot_date, slot_time)
+                            if key in self._booked_keys:
+                                continue
+
+                            self._log(f"  [{restaurant.name}] マッチ! {date_str} {slot_time}")
+                            self._update_status(f"予約確保中: {restaurant.name} {date_str} {slot_time}")
 
                             try:
-                                # Phase 1: Reserve the slot (no payment yet)
                                 reserved = await client.reserve_slot(
                                     restaurant, date_str, slot_time
                                 )
                                 if not reserved:
-                                    self._log(f"予約確保失敗: {date_str} {slot_time}")
+                                    self._log(f"  [{restaurant.name}] 予約確保失敗")
                                     continue
 
-                                self._log("予約枠を確保しました。承認待ち...")
+                                self._log(f"  [{restaurant.name}] 枠確保完了。承認待ち...")
 
-                                # Phase 2: Request approval via Google Chat
+                                cancellation_policy = policies.get(restaurant.omakase_url, "")
                                 approval_result = await self._request_payment_approval(
                                     restaurant, date_str, slot_time, cancellation_policy
                                 )
 
                                 if approval_result == APPROVED:
-                                    # Phase 3: Complete payment
                                     self._log("承認されました。決済を実行中...")
-                                    self._update_status(f"決済中: {date_str} {slot_time}")
+                                    self._update_status(f"決済中: {restaurant.name}")
                                     paid = await client.complete_payment()
                                     if paid:
+                                        self._booked_keys.add(key)
                                         self._log(f"予約・決済完了! {restaurant.name} {date_str} {slot_time}")
-                                        self._on_booking_success(
-                                            restaurant, date_str, slot_time
-                                        )
-                                        return
+                                        self._on_booking_success(restaurant, date_str, slot_time)
+                                        booked_this_cycle = True
+                                        if not continuous:
+                                            return
                                     else:
-                                        self._log(f"決済失敗: {date_str} {slot_time}")
+                                        self._log(f"  [{restaurant.name}] 決済失敗")
                                 elif approval_result == REJECTED:
-                                    self._log("却下されました。決済をスキップします。")
-                                    self._update_status("承認却下")
+                                    self._log(f"  [{restaurant.name}] 却下されました")
+                                    self._booked_keys.add(key)  # Don't retry rejected
                                 else:
-                                    self._log("承認タイムアウト。決済をスキップします。")
-                                    self._update_status("承認タイムアウト")
+                                    self._log(f"  [{restaurant.name}] 承認タイムアウト")
 
                             except Exception as e:
-                                self._log(f"予約エラー: {e}")
+                                self._log(f"  [{restaurant.name}] エラー: {e}")
+
+                # In non-continuous mode, stop after one successful booking
+                if booked_this_cycle and not continuous:
+                    break
 
                 # Determine polling interval
-                interval = self._get_poll_interval(open_time)
+                best_open_time = None
+                for restaurant in targets:
+                    ot = open_times.get(restaurant.omakase_url)
+                    if ot:
+                        best_open_time = ot
+                        break
+                interval = self._get_poll_interval(best_open_time)
+
+                # In continuous mode, use cancellation check interval when no open time is near
+                if continuous and interval == self.config.check_interval_seconds:
+                    interval = min(interval, self.config.cancellation_check_interval_seconds)
+
                 self._log(f"次の確認まで {interval}秒")
 
-                # Wait with stop check
                 for _ in range(int(interval / 0.1)):
                     if self._stop_event.is_set():
                         break

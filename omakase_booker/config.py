@@ -7,6 +7,20 @@ import yaml
 
 
 @dataclass
+class RestaurantInfo:
+    """Restaurant metadata scraped from Omakase listings."""
+
+    name: str
+    url: str  # e.g. "https://omakase.in/r/abcdef123"
+    area: str = ""  # e.g. "東京", "大阪"
+    genre: str = ""  # e.g. "鮨", "天ぷら"
+    price_range: str = ""  # e.g. "¥30,000〜"
+    rating: str = ""
+    image_url: str = ""
+    description: str = ""
+
+
+@dataclass
 class RestaurantTarget:
     """A restaurant to monitor and book."""
 
@@ -18,6 +32,8 @@ class RestaurantTarget:
     booking_mode: str = "first_come"  # "first_come" or "lottery"
     # User-specified candidate dates (YYYY-MM-DD). If empty, use Google Calendar.
     candidate_dates: list[str] = field(default_factory=list)
+    # Cancellation waitlist: monitor for newly available slots even after initial booking attempt
+    watch_cancellations: bool = True
 
 
 @dataclass
@@ -42,6 +58,8 @@ class Config:
     check_interval_seconds: int = 30  # How often to poll for new slots
     fast_poll_interval_seconds: float = 0.5  # Interval during fast-polling near open time
     fast_poll_window_minutes: int = 5  # Minutes before/after open time for fast polling
+    continuous_mode: bool = True  # Always-on: keep monitoring for cancellations
+    cancellation_check_interval_seconds: int = 300  # How often to check for cancellations (5 min)
 
     # Google Chat approval
     gchat_webhook_url: str = ""  # Google Chat incoming webhook URL

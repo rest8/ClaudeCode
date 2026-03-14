@@ -32,6 +32,7 @@ target_restaurants:
       - "19:00"
     course_keyword: null
     booking_mode: "first_come"
+    watch_cancellations: true       # Monitor for cancellation openings
     candidate_dates:              # Specific dates to try (optional)
       - "2026-04-15"
       - "2026-04-16"
@@ -46,11 +47,17 @@ target_restaurants:
       - "19:00"
     course_keyword: null
     booking_mode: "lottery"       # This restaurant uses the raffle system
+    watch_cancellations: true
+
+# Note: レストランはGUIの「検索して追加」ボタンからエリア・ジャンル別に
+#       OMAKASEの掲載レストランを検索して追加することもできます。
 
 # --- Scheduling ---
 check_interval_seconds: 30        # Normal polling interval (seconds)
 fast_poll_interval_seconds: 0.5   # Fast polling near reservation open time (seconds)
 fast_poll_window_minutes: 5       # Minutes before/after open time for fast polling
+continuous_mode: true             # Always-on mode: keep monitoring for cancellations
+cancellation_check_interval_seconds: 300  # How often to check for cancellations (5 min)
 
 # --- Google Chat Approval ---
 # 決済前にGoogle Chatで承認依頼を送信します。
