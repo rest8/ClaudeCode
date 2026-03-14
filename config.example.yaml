@@ -70,3 +70,4 @@ approval_fee_per_person: 390      # Seat reservation fee per person (JPY)
 # --- Browser ---
 headless: true                    # Set false for debugging (shows browser window)
 browser_timeout_ms: 30000
+dry_run: false                    # Set true to skip payment (動作検証用)

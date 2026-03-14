@@ -704,10 +704,16 @@ class OmakaseClient:
         """Complete the payment step for an already-reserved slot.
 
         Should be called after reserve_slot() and after user approval.
+        In dry-run mode, logs the action but does not actually pay.
 
         Returns:
-            True if payment succeeded.
+            True if payment succeeded (or dry-run).
         """
+        if self.config.dry_run:
+            logger.info("[DRY RUN] Payment skipped (would have charged ¥%d/person).",
+                        self.config.approval_fee_per_person if hasattr(self.config, 'approval_fee_per_person') else 390)
+            return True
+
         paid = await self._complete_payment()
         if not paid:
             logger.warning("Payment may have failed. Check your account.")

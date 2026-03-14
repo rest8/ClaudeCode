@@ -408,19 +408,32 @@ async def run_scheduler(config: Config):
 
 def main():
     """Entry point."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Omakase Auto-Booker CLI")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="ドライランモード: 決済をスキップして動作検証")
+    parser.add_argument("--config", default="config.yaml",
+                        help="設定ファイルパス (default: config.yaml)")
+    args = parser.parse_args()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    config_path = Path("config.yaml")
+    config_path = Path(args.config)
     if not config_path.exists():
-        print("Error: config.yaml not found.")
+        print(f"Error: {config_path} not found.")
         print("Copy config.example.yaml to config.yaml and fill in your settings.")
         sys.exit(1)
 
     config = Config.from_yaml(config_path)
+
+    # Apply CLI overrides
+    if args.dry_run:
+        config.dry_run = True
 
     if not config.omakase_email or not config.omakase_password:
         print("Error: Omakase email and password must be set in config.yaml")
@@ -432,6 +445,8 @@ def main():
 
     print("=" * 60)
     print("  Omakase Auto-Booker")
+    if config.dry_run:
+        print("  *** ドライランモード（決済はスキップされます） ***")
     print("=" * 60)
     print()
     print("  WARNING: Omakase (omakase.in) の利用規約では")

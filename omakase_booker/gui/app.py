@@ -195,6 +195,14 @@ class OmakaseApp:
         frame = ttk.LabelFrame(parent, text="予約実行", padding=10, width=350)
         frame.pack(fill=X, pady=(0, 10))
 
+        # Dry-run toggle
+        self.dry_run_var = tk.BooleanVar(value=self.config.dry_run)
+        ttk.Checkbutton(
+            frame, text="ドライラン（決済スキップ）",
+            variable=self.dry_run_var,
+            bootstyle="warning-round-toggle",
+        ).pack(fill=X, pady=(0, 5))
+
         self.start_btn = ttk.Button(
             frame,
             text="予約開始",
@@ -423,6 +431,9 @@ class OmakaseApp:
         for t in targets:
             t.candidate_dates = list(date_strs)
 
+        # Apply dry-run setting
+        self.config.dry_run = self.dry_run_var.get()
+
         self.start_btn.configure(state=DISABLED)
         self.stop_btn.configure(state=NORMAL)
         self.progress.start(10)
@@ -459,6 +470,8 @@ class OmakaseApp:
         self._update_status("ログイン中...")
         continuous = self.continuous_var.get()
         mode_label = "常時監視" if continuous else "通常"
+        if self.config.dry_run:
+            mode_label += " / ドライラン"
         self._log(f"予約開始 ({mode_label}): {len(targets)} 件のレストラン")
 
         client = OmakaseClient(self.config)

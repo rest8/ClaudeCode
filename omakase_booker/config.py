@@ -70,6 +70,7 @@ class Config:
     # Browser
     headless: bool = True
     browser_timeout_ms: int = 30000
+    dry_run: bool = False  # Dry-run mode: skip actual payment
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Config":
