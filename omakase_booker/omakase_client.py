@@ -14,11 +14,15 @@ The flow:
   5. Select matching slot, confirm booking, and complete payment
 """
 
+from __future__ import annotations
+
 import logging
 import re
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from playwright.async_api import async_playwright, Page, Browser, BrowserContext
+if TYPE_CHECKING:
+    from playwright.async_api import Page, Browser, BrowserContext
 
 from .config import Config, RestaurantInfo, RestaurantTarget
 
@@ -54,6 +58,8 @@ class OmakaseClient:
 
     async def start(self):
         """Launch browser and log in."""
+        from playwright.async_api import async_playwright
+
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=self.config.headless,
