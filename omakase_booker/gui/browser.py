@@ -61,7 +61,7 @@ class RestaurantBrowserDialog:
 
     def _build_search_panel(self, parent):
         """Build search and filter controls."""
-        frame = ttk.LabelFrame(parent, text="検索・フィルタ", padding=10)
+        frame = ttk.LabelFrame(parent, text="検索・フィルタ")
         frame.pack(fill=X)
 
         # Row 1: Load button + Search
@@ -117,7 +117,7 @@ class RestaurantBrowserDialog:
 
     def _build_results_panel(self, parent):
         """Build the restaurant results list."""
-        frame = ttk.LabelFrame(parent, text="レストラン一覧", padding=5)
+        frame = ttk.LabelFrame(parent, text="レストラン一覧")
         frame.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
 
         # Treeview for results
@@ -153,7 +153,7 @@ class RestaurantBrowserDialog:
 
     def _build_detail_panel(self, parent):
         """Build the restaurant detail panel."""
-        frame = ttk.LabelFrame(parent, text="詳細", padding=10, width=280)
+        frame = ttk.LabelFrame(parent, text="詳細", width=280)
         frame.pack(side=RIGHT, fill=Y, padx=(5, 0))
         frame.pack_propagate(False)
 
@@ -182,7 +182,7 @@ class RestaurantBrowserDialog:
         ).pack(fill=X, pady=(0, 10))
 
         # Booking settings for selected restaurant
-        settings_frame = ttk.LabelFrame(frame, text="予約設定", padding=5)
+        settings_frame = ttk.LabelFrame(frame, text="予約設定")
         settings_frame.pack(fill=X, pady=(0, 10))
 
         r1 = ttk.Frame(settings_frame)

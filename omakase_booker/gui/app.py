@@ -56,7 +56,7 @@ class OmakaseApp:
         main_frame.pack(fill=BOTH, expand=True)
 
         # Left panel: Calendar
-        left_frame = ttk.LabelFrame(main_frame, text="カレンダー", padding=10)
+        left_frame = ttk.LabelFrame(main_frame, text="カレンダー")
         left_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
 
         self._build_calendar(left_frame)
@@ -118,7 +118,7 @@ class OmakaseApp:
 
     def _build_restaurant_panel(self, parent):
         """Build the restaurant selection panel."""
-        frame = ttk.LabelFrame(parent, text="レストラン", padding=10, width=350)
+        frame = ttk.LabelFrame(parent, text="レストラン", width=350)
         frame.pack(fill=X, pady=(0, 10))
         frame.pack_propagate(False)
         frame.configure(height=220)
@@ -159,7 +159,7 @@ class OmakaseApp:
 
     def _build_candidate_panel(self, parent):
         """Build the candidate dates display panel."""
-        frame = ttk.LabelFrame(parent, text="予約候補日", padding=10, width=350)
+        frame = ttk.LabelFrame(parent, text="予約候補日", width=350)
         frame.pack(fill=X, pady=(0, 10))
         frame.pack_propagate(False)
         frame.configure(height=120)
@@ -192,7 +192,7 @@ class OmakaseApp:
 
     def _build_action_panel(self, parent):
         """Build the booking action panel."""
-        frame = ttk.LabelFrame(parent, text="予約実行", padding=10, width=350)
+        frame = ttk.LabelFrame(parent, text="予約実行", width=350)
         frame.pack(fill=X, pady=(0, 10))
 
         # Dry-run toggle
@@ -242,7 +242,7 @@ class OmakaseApp:
 
     def _build_log_panel(self, parent):
         """Build the log output panel."""
-        frame = ttk.LabelFrame(parent, text="ログ", padding=10, width=350)
+        frame = ttk.LabelFrame(parent, text="ログ", width=350)
         frame.pack(fill=BOTH, expand=True)
 
         self.log_text = tk.Text(
