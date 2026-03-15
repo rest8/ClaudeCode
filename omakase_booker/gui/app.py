@@ -37,7 +37,8 @@ class OmakaseApp:
 
         self._build_ui()
         self._load_restaurants()
-        self._sync_calendar()
+        # Defer calendar sync to after the window is shown
+        self.root.after(500, self._sync_calendar)
 
     def _build_ui(self):
         """Build the main application window."""
@@ -266,6 +267,13 @@ class OmakaseApp:
 
     def _sync_calendar(self, *_args):
         """Fetch Google Calendar events and update the calendar display."""
+        from pathlib import Path
+
+        creds_path = Path(self.config.google_credentials_path)
+        if not creds_path.exists():
+            self._log("Google カレンダー: credentials.json が未設定のためスキップ")
+            return
+
         self._log("Google カレンダーを同期中...")
         try:
             today = date.today()

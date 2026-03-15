@@ -239,6 +239,13 @@ class RestaurantBrowserDialog:
                 result = loop.run_until_complete(coro)
                 if callback:
                     self.dialog.after(0, lambda: callback(result))
+            except ImportError as e:
+                msg = (
+                    "Playwright が利用できません。以下を実行してください:\n"
+                    "  pip install playwright && playwright install chromium"
+                )
+                logger.error(msg)
+                self.dialog.after(0, lambda: self._set_status(f"エラー: {msg}"))
             except Exception as e:
                 logger.exception("Browser async error")
                 self.dialog.after(0, lambda: self._set_status(f"エラー: {e}"))
