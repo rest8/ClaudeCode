@@ -32,6 +32,9 @@ class OmakaseBookingError(Exception):
     """Raised when booking fails."""
 
 
+class OmakaseClient:
+    """Automated client for Omakase.in reservations."""
+
     # Resource types to block for faster page loads
     BLOCKED_RESOURCE_TYPES = {"image", "font", "media"}
     # URL patterns to block (analytics, tracking, ads)
@@ -40,9 +43,6 @@ class OmakaseBookingError(Exception):
         "facebook.net", "doubleclick.net", "ads",
         "analytics", "tracking", ".woff", ".woff2",
     ]
-
-class OmakaseClient:
-    """Automated client for Omakase.in reservations."""
 
     def __init__(self, config: Config):
         self.config = config
