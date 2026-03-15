@@ -4,11 +4,9 @@ import asyncio
 import logging
 import threading
 import tkinter as tk
+from tkinter import ttk, messagebox
 from datetime import date, datetime, timedelta
-from tkinter import messagebox
 
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
 from tkcalendar import Calendar
 
 from ..config import Config, RestaurantTarget
@@ -43,27 +41,24 @@ class OmakaseApp:
 
     def _build_ui(self):
         """Build the main application window."""
-        self.root = ttk.Window(
-            title="Omakase Auto-Booker",
-            themename="cosmo",
-            size=(1000, 700),
-            resizable=(True, True),
-        )
+        self.root = tk.Tk()
+        self.root.title("Omakase Auto-Booker")
+        self.root.geometry("1000x700")
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Main container
         main_frame = ttk.Frame(self.root, padding=10)
-        main_frame.pack(fill=BOTH, expand=True)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
         # Left panel: Calendar
-        left_frame = ttk.LabelFrame(main_frame, text="カレンダー")
-        left_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
+        left_frame = ttk.LabelFrame(main_frame, text="カレンダー", padding=10)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
         self._build_calendar(left_frame)
 
         # Right panel: Controls
         right_frame = ttk.Frame(main_frame)
-        right_frame.pack(side=RIGHT, fill=BOTH, expand=False, padx=(5, 0))
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=False, padx=(5, 0))
 
         self._build_restaurant_panel(right_frame)
         self._build_candidate_panel(right_frame)
@@ -87,7 +82,7 @@ class OmakaseApp:
             borderwidth=0,
             cursor="hand2",
         )
-        self.calendar.pack(fill=BOTH, expand=True, pady=(0, 10))
+        self.calendar.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # Bind click to toggle candidate date
         self.calendar.bind("<<CalendarSelected>>", self._on_date_click)
@@ -96,7 +91,7 @@ class OmakaseApp:
 
         # Legend
         legend_frame = ttk.Frame(parent)
-        legend_frame.pack(fill=X)
+        legend_frame.pack(fill=tk.X)
 
         for color, label in [
             (COLOR_GCAL_EVENT, "Google Calendar"),
@@ -105,23 +100,20 @@ class OmakaseApp:
         ]:
             dot = tk.Canvas(legend_frame, width=12, height=12, highlightthickness=0)
             dot.create_oval(2, 2, 10, 10, fill=color, outline=color)
-            dot.pack(side=LEFT, padx=(10, 2))
-            ttk.Label(legend_frame, text=label, font=("Yu Gothic UI", 9)).pack(side=LEFT, padx=(0, 10))
+            dot.pack(side=tk.LEFT, padx=(10, 2))
+            ttk.Label(legend_frame, text=label, font=("Yu Gothic UI", 9)).pack(side=tk.LEFT, padx=(0, 10))
 
         # Sync button
         ttk.Button(
             parent,
             text="カレンダー同期",
             command=self._sync_calendar,
-            bootstyle="info-outline",
-        ).pack(fill=X, pady=(10, 0))
+        ).pack(fill=tk.X, pady=(10, 0))
 
     def _build_restaurant_panel(self, parent):
         """Build the restaurant selection panel."""
-        frame = ttk.LabelFrame(parent, text="レストラン", width=350)
-        frame.pack(fill=X, pady=(0, 10))
-        frame.pack_propagate(False)
-        frame.configure(height=220)
+        frame = ttk.LabelFrame(parent, text="レストラン", padding=10)
+        frame.pack(fill=tk.X, pady=(0, 10))
 
         self.restaurant_listbox = tk.Listbox(
             frame,
@@ -129,56 +121,50 @@ class OmakaseApp:
             selectmode=tk.EXTENDED,
             height=5,
         )
-        self.restaurant_listbox.pack(fill=BOTH, expand=True)
+        self.restaurant_listbox.pack(fill=tk.BOTH, expand=True)
         self.restaurant_listbox.bind("<<ListboxSelect>>", self._on_restaurant_select)
 
         btn_row = ttk.Frame(frame)
-        btn_row.pack(fill=X, pady=(5, 0))
+        btn_row.pack(fill=tk.X, pady=(5, 0))
 
         ttk.Button(
             btn_row, text="検索して追加",
             command=self._open_browser,
-            bootstyle="info-outline",
             width=12,
-        ).pack(side=LEFT, padx=(0, 5))
+        ).pack(side=tk.LEFT, padx=(0, 5))
 
         ttk.Button(
             btn_row, text="削除",
             command=self._remove_restaurant,
-            bootstyle="danger-outline",
             width=6,
-        ).pack(side=LEFT)
+        ).pack(side=tk.LEFT)
 
         # Continuous mode toggle
         self.continuous_var = tk.BooleanVar(value=self.config.continuous_mode)
         ttk.Checkbutton(
             btn_row, text="常時監視",
             variable=self.continuous_var,
-            bootstyle="round-toggle",
-        ).pack(side=RIGHT)
+        ).pack(side=tk.RIGHT)
 
     def _build_candidate_panel(self, parent):
         """Build the candidate dates display panel."""
-        frame = ttk.LabelFrame(parent, text="予約候補日", width=350)
-        frame.pack(fill=X, pady=(0, 10))
-        frame.pack_propagate(False)
-        frame.configure(height=120)
+        frame = ttk.LabelFrame(parent, text="予約候補日", padding=10)
+        frame.pack(fill=tk.X, pady=(0, 10))
 
         self.candidate_listbox = tk.Listbox(
             frame,
             font=("Yu Gothic UI", 10),
             height=4,
         )
-        self.candidate_listbox.pack(fill=BOTH, expand=True, side=LEFT)
+        self.candidate_listbox.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
 
         btn_frame = ttk.Frame(frame)
-        btn_frame.pack(side=RIGHT, fill=Y, padx=(5, 0))
+        btn_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
 
         ttk.Button(
             btn_frame,
             text="削除",
             command=self._remove_candidate,
-            bootstyle="danger-outline",
             width=6,
         ).pack(pady=(0, 5))
 
@@ -186,41 +172,37 @@ class OmakaseApp:
             btn_frame,
             text="全削除",
             command=self._clear_candidates,
-            bootstyle="danger-outline",
             width=6,
         ).pack()
 
     def _build_action_panel(self, parent):
         """Build the booking action panel."""
-        frame = ttk.LabelFrame(parent, text="予約実行", width=350)
-        frame.pack(fill=X, pady=(0, 10))
+        frame = ttk.LabelFrame(parent, text="予約実行", padding=10)
+        frame.pack(fill=tk.X, pady=(0, 10))
 
         # Dry-run toggle
         self.dry_run_var = tk.BooleanVar(value=self.config.dry_run)
         ttk.Checkbutton(
             frame, text="ドライラン（決済スキップ）",
             variable=self.dry_run_var,
-            bootstyle="warning-round-toggle",
-        ).pack(fill=X, pady=(0, 5))
+        ).pack(fill=tk.X, pady=(0, 5))
 
         self.start_btn = ttk.Button(
             frame,
             text="予約開始",
             command=self._start_booking,
-            bootstyle="success",
             width=20,
         )
-        self.start_btn.pack(fill=X, pady=(0, 5))
+        self.start_btn.pack(fill=tk.X, pady=(0, 5))
 
         self.stop_btn = ttk.Button(
             frame,
             text="停止",
             command=self._stop_booking,
-            bootstyle="danger",
             width=20,
-            state=DISABLED,
+            state=tk.DISABLED,
         )
-        self.stop_btn.pack(fill=X, pady=(0, 5))
+        self.stop_btn.pack(fill=tk.X, pady=(0, 5))
 
         # Status label
         self.status_var = tk.StringVar(value="待機中")
@@ -228,22 +210,20 @@ class OmakaseApp:
             frame,
             textvariable=self.status_var,
             font=("Yu Gothic UI", 10),
-            bootstyle="info",
         )
-        self.status_label.pack(fill=X)
+        self.status_label.pack(fill=tk.X)
 
         # Progress bar
         self.progress = ttk.Progressbar(
             frame,
             mode="indeterminate",
-            bootstyle="info",
         )
-        self.progress.pack(fill=X, pady=(5, 0))
+        self.progress.pack(fill=tk.X, pady=(5, 0))
 
     def _build_log_panel(self, parent):
         """Build the log output panel."""
-        frame = ttk.LabelFrame(parent, text="ログ", width=350)
-        frame.pack(fill=BOTH, expand=True)
+        frame = ttk.LabelFrame(parent, text="ログ", padding=10)
+        frame.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(
             frame,
@@ -254,10 +234,10 @@ class OmakaseApp:
             bg="#1e1e1e",
             fg="#d4d4d4",
         )
-        self.log_text.pack(fill=BOTH, expand=True)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
 
         scrollbar = ttk.Scrollbar(self.log_text, command=self.log_text.yview)
-        scrollbar.pack(side=RIGHT, fill=Y)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.configure(yscrollcommand=scrollbar.set)
 
     # ── Data / Logic ──────────────────────────────────────────
@@ -434,8 +414,8 @@ class OmakaseApp:
         # Apply dry-run setting
         self.config.dry_run = self.dry_run_var.get()
 
-        self.start_btn.configure(state=DISABLED)
-        self.stop_btn.configure(state=NORMAL)
+        self.start_btn.configure(state=tk.DISABLED)
+        self.stop_btn.configure(state=tk.NORMAL)
         self.progress.start(10)
         self._stop_event.clear()
 
@@ -763,8 +743,8 @@ class OmakaseApp:
 
     def _booking_finished(self):
         """Called on main thread when booking worker finishes."""
-        self.start_btn.configure(state=NORMAL)
-        self.stop_btn.configure(state=DISABLED)
+        self.start_btn.configure(state=tk.NORMAL)
+        self.stop_btn.configure(state=tk.DISABLED)
         self.progress.stop()
         if self.status_var.get() not in ("停止", "ログインエラー"):
             self._update_status("完了")

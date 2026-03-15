@@ -4,9 +4,7 @@ import asyncio
 import logging
 import threading
 import tkinter as tk
-
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
+from tkinter import ttk
 
 from ..config import Config, RestaurantInfo, RestaurantTarget
 from ..omakase_client import OmakaseClient
@@ -37,14 +35,14 @@ class RestaurantBrowserDialog:
         self.dialog.grab_set()
 
         main_frame = ttk.Frame(self.dialog, padding=10)
-        main_frame.pack(fill=BOTH, expand=True)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
         # Top: Search & Filter controls
         self._build_search_panel(main_frame)
 
         # Middle: Results area (left: list, right: detail)
         content = ttk.Frame(main_frame)
-        content.pack(fill=BOTH, expand=True, pady=(10, 0))
+        content.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
 
         self._build_results_panel(content)
         self._build_detail_panel(content)
@@ -56,69 +54,66 @@ class RestaurantBrowserDialog:
         self.status_var = tk.StringVar(value="「読み込み」ボタンでエリア・ジャンルを取得してください")
         ttk.Label(
             main_frame, textvariable=self.status_var,
-            font=("Yu Gothic UI", 9), bootstyle="secondary",
-        ).pack(fill=X, pady=(5, 0))
+            font=("Yu Gothic UI", 9),
+        ).pack(fill=tk.X, pady=(5, 0))
 
     def _build_search_panel(self, parent):
         """Build search and filter controls."""
-        frame = ttk.LabelFrame(parent, text="検索・フィルタ")
-        frame.pack(fill=X)
+        frame = ttk.LabelFrame(parent, text="検索・フィルタ", padding=10)
+        frame.pack(fill=tk.X)
 
         # Row 1: Load button + Search
         row1 = ttk.Frame(frame)
-        row1.pack(fill=X, pady=(0, 5))
+        row1.pack(fill=tk.X, pady=(0, 5))
 
         ttk.Button(
             row1, text="読み込み",
             command=self._load_browse_urls,
-            bootstyle="info",
             width=10,
-        ).pack(side=LEFT, padx=(0, 10))
+        ).pack(side=tk.LEFT, padx=(0, 10))
 
-        ttk.Label(row1, text="検索:").pack(side=LEFT, padx=(0, 5))
+        ttk.Label(row1, text="検索:").pack(side=tk.LEFT, padx=(0, 5))
         self.search_var = tk.StringVar()
         search_entry = ttk.Entry(row1, textvariable=self.search_var, width=30)
-        search_entry.pack(side=LEFT, padx=(0, 5))
+        search_entry.pack(side=tk.LEFT, padx=(0, 5))
         search_entry.bind("<Return>", lambda _: self._do_search())
 
         ttk.Button(
             row1, text="検索",
             command=self._do_search,
-            bootstyle="primary",
             width=8,
-        ).pack(side=LEFT)
+        ).pack(side=tk.LEFT)
 
         # Row 2: Area + Genre dropdowns
         row2 = ttk.Frame(frame)
-        row2.pack(fill=X)
+        row2.pack(fill=tk.X)
 
-        ttk.Label(row2, text="エリア:").pack(side=LEFT, padx=(0, 5))
+        ttk.Label(row2, text="エリア:").pack(side=tk.LEFT, padx=(0, 5))
         self.area_var = tk.StringVar(value="-- 選択 --")
         self.area_combo = ttk.Combobox(
             row2, textvariable=self.area_var, state="readonly", width=20,
         )
-        self.area_combo.pack(side=LEFT, padx=(0, 15))
+        self.area_combo.pack(side=tk.LEFT, padx=(0, 15))
         self.area_combo.bind("<<ComboboxSelected>>", self._on_area_selected)
 
-        ttk.Label(row2, text="ジャンル:").pack(side=LEFT, padx=(0, 5))
+        ttk.Label(row2, text="ジャンル:").pack(side=tk.LEFT, padx=(0, 5))
         self.genre_var = tk.StringVar(value="-- 選択 --")
         self.genre_combo = ttk.Combobox(
             row2, textvariable=self.genre_var, state="readonly", width=20,
         )
-        self.genre_combo.pack(side=LEFT, padx=(0, 15))
+        self.genre_combo.pack(side=tk.LEFT, padx=(0, 15))
         self.genre_combo.bind("<<ComboboxSelected>>", self._on_genre_selected)
 
         ttk.Button(
             row2, text="全ページ取得",
             command=self._browse_all_pages,
-            bootstyle="outline",
             width=12,
-        ).pack(side=LEFT)
+        ).pack(side=tk.LEFT)
 
     def _build_results_panel(self, parent):
         """Build the restaurant results list."""
-        frame = ttk.LabelFrame(parent, text="レストラン一覧")
-        frame.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
+        frame = ttk.LabelFrame(parent, text="レストラン一覧", padding=5)
+        frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
         # Treeview for results
         columns = ("name", "area", "genre", "price")
@@ -136,11 +131,11 @@ class RestaurantBrowserDialog:
         self.results_tree.column("genre", width=100)
         self.results_tree.column("price", width=100)
 
-        scrollbar = ttk.Scrollbar(frame, orient=VERTICAL, command=self.results_tree.yview)
+        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.results_tree.yview)
         self.results_tree.configure(yscrollcommand=scrollbar.set)
 
-        self.results_tree.pack(side=LEFT, fill=BOTH, expand=True)
-        scrollbar.pack(side=RIGHT, fill=Y)
+        self.results_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.results_tree.bind("<<TreeviewSelect>>", self._on_result_select)
 
@@ -149,12 +144,13 @@ class RestaurantBrowserDialog:
         ttk.Label(
             frame, textvariable=self.result_count_var,
             font=("Yu Gothic UI", 9),
-        ).pack(fill=X, pady=(3, 0))
+        ).pack(fill=tk.X, pady=(3, 0))
 
     def _build_detail_panel(self, parent):
         """Build the restaurant detail panel."""
-        frame = ttk.LabelFrame(parent, text="詳細", width=280)
-        frame.pack(side=RIGHT, fill=Y, padx=(5, 0))
+        frame = ttk.LabelFrame(parent, text="詳細", padding=10)
+        frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+        frame.configure(width=280)
         frame.pack_propagate(False)
 
         self.detail_name = tk.StringVar(value="---")
@@ -162,81 +158,76 @@ class RestaurantBrowserDialog:
             frame, textvariable=self.detail_name,
             font=("Yu Gothic UI", 12, "bold"),
             wraplength=250,
-        ).pack(fill=X, pady=(0, 5))
+        ).pack(fill=tk.X, pady=(0, 5))
 
         self.detail_info = tk.StringVar(value="")
         ttk.Label(
             frame, textvariable=self.detail_info,
             font=("Yu Gothic UI", 9),
             wraplength=250,
-            justify=LEFT,
-        ).pack(fill=X, pady=(0, 10))
+            justify=tk.LEFT,
+        ).pack(fill=tk.X, pady=(0, 10))
 
         self.detail_desc = tk.StringVar(value="")
         ttk.Label(
             frame, textvariable=self.detail_desc,
             font=("Yu Gothic UI", 9),
             wraplength=250,
-            justify=LEFT,
-            bootstyle="secondary",
-        ).pack(fill=X, pady=(0, 10))
+            justify=tk.LEFT,
+        ).pack(fill=tk.X, pady=(0, 10))
 
         # Booking settings for selected restaurant
-        settings_frame = ttk.LabelFrame(frame, text="予約設定")
-        settings_frame.pack(fill=X, pady=(0, 10))
+        settings_frame = ttk.LabelFrame(frame, text="予約設定", padding=5)
+        settings_frame.pack(fill=tk.X, pady=(0, 10))
 
         r1 = ttk.Frame(settings_frame)
-        r1.pack(fill=X, pady=2)
-        ttk.Label(r1, text="人数:").pack(side=LEFT)
+        r1.pack(fill=tk.X, pady=2)
+        ttk.Label(r1, text="人数:").pack(side=tk.LEFT)
         self.party_size_var = tk.IntVar(value=2)
         ttk.Spinbox(
             r1, from_=1, to=10, textvariable=self.party_size_var, width=5,
-        ).pack(side=LEFT, padx=(5, 0))
+        ).pack(side=tk.LEFT, padx=(5, 0))
 
         r2 = ttk.Frame(settings_frame)
-        r2.pack(fill=X, pady=2)
-        ttk.Label(r2, text="モード:").pack(side=LEFT)
+        r2.pack(fill=tk.X, pady=2)
+        ttk.Label(r2, text="モード:").pack(side=tk.LEFT)
         self.mode_var = tk.StringVar(value="first_come")
-        ttk.Radiobutton(r2, text="先着", variable=self.mode_var, value="first_come").pack(side=LEFT, padx=5)
-        ttk.Radiobutton(r2, text="抽選", variable=self.mode_var, value="lottery").pack(side=LEFT)
+        ttk.Radiobutton(r2, text="先着", variable=self.mode_var, value="first_come").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(r2, text="抽選", variable=self.mode_var, value="lottery").pack(side=tk.LEFT)
 
         r3 = ttk.Frame(settings_frame)
-        r3.pack(fill=X, pady=2)
-        ttk.Label(r3, text="時間帯:").pack(side=LEFT)
+        r3.pack(fill=tk.X, pady=2)
+        ttk.Label(r3, text="時間帯:").pack(side=tk.LEFT)
         self.times_var = tk.StringVar(value="18:00, 19:00, 20:00")
-        ttk.Entry(r3, textvariable=self.times_var, width=20).pack(side=LEFT, padx=(5, 0))
+        ttk.Entry(r3, textvariable=self.times_var, width=20).pack(side=tk.LEFT, padx=(5, 0))
 
         # Add button (prominent)
         ttk.Button(
             frame, text="予約対象に追加 →",
             command=self._add_selected,
-            bootstyle="success",
-        ).pack(fill=X, pady=(10, 0))
+        ).pack(fill=tk.X, pady=(10, 0))
 
     def _build_action_panel(self, parent):
         """Build bottom action buttons."""
         frame = ttk.Frame(parent)
-        frame.pack(fill=X, pady=(10, 0))
+        frame.pack(fill=tk.X, pady=(10, 0))
 
         ttk.Button(
             frame, text="選択を一括追加",
             command=self._add_all_selected,
-            bootstyle="success-outline",
-        ).pack(side=LEFT, padx=(0, 10))
+        ).pack(side=tk.LEFT, padx=(0, 10))
 
         self.added_count_var = tk.StringVar(value="追加済み: 0 件")
         ttk.Label(
             frame, textvariable=self.added_count_var,
             font=("Yu Gothic UI", 10, "bold"),
-            bootstyle="success",
-        ).pack(side=LEFT)
+        ).pack(side=tk.LEFT)
 
         ttk.Button(
             frame, text="完了",
             command=self._on_done,
-            bootstyle="primary",
             width=10,
-        ).pack(side=RIGHT)
+        ).pack(side=tk.RIGHT)
 
     # ── Background Tasks ──────────────────────────────────────
 
@@ -478,7 +469,7 @@ class RestaurantBrowserDialog:
         self.results_tree.delete(*self.results_tree.get_children())
 
         for r in restaurants:
-            self.results_tree.insert("", END, values=(
+            self.results_tree.insert("", tk.END, values=(
                 r.name, r.area, r.genre, r.price_range,
             ))
 
