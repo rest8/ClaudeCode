@@ -81,6 +81,68 @@ def _build_candidate_dates(
     return result
 
 
+async def _try_book_from_slots(
+    client: OmakaseClient,
+    restaurant: RestaurantTarget,
+    candidate_dates: list[tuple[datetime, list[str]]],
+    omakase_slots: list[dict],
+) -> bool:
+    """Try to book using pre-fetched slots. Used by the parallel flow."""
+    cancellation_policy = ""
+    try:
+        cancellation_policy = await client.scrape_cancellation_policy(restaurant)
+    except Exception:
+        logger.exception("Failed to scrape cancellation policy for %s", restaurant.name)
+
+    for cal_date, cal_times in candidate_dates:
+        date_str = cal_date.strftime("%Y-%m-%d")
+
+        for slot in omakase_slots:
+            slot_date = slot.get("date")
+            slot_time = slot.get("time")
+            if not slot_date or not slot_time:
+                continue
+            if slot_date != date_str or slot_time not in cal_times:
+                continue
+
+            key = (restaurant.omakase_url, slot_date, slot_time)
+            if key in _booked:
+                continue
+
+            logger.info("Match found! %s on %s at %s - reserving...", restaurant.name, slot_date, slot_time)
+            try:
+                reserved = await client.reserve_slot(restaurant, slot_date, slot_time)
+                if not reserved:
+                    notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - reservation failed")
+                    continue
+
+                approval = await _request_cli_approval(restaurant, slot_date, slot_time, cancellation_policy)
+                if approval != APPROVED:
+                    logger.info("Payment %s for %s %s %s",
+                                "rejected" if approval == REJECTED else "timed out",
+                                restaurant.name, slot_date, slot_time)
+                    notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - approval {approval}")
+                    continue
+
+                logger.info("Approval received, completing payment...")
+                paid = await client.complete_payment()
+                if paid:
+                    _booked.add(key)
+                    notify_success(restaurant.name, slot_date, slot_time)
+                    try:
+                        create_booking_event(_current_config, restaurant.name, slot_date, slot_time, restaurant.party_size)
+                    except Exception:
+                        logger.exception("Failed to create calendar event")
+                    return True
+                else:
+                    notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - payment failed")
+            except Exception:
+                logger.exception("Error booking %s", restaurant.name)
+                notify_failure(restaurant.name, f"Slot {slot_date} {slot_time} - exception")
+
+    return False
+
+
 async def try_book_restaurant(
     client: OmakaseClient,
     restaurant: RestaurantTarget,
@@ -286,8 +348,60 @@ def _is_near_any_open_time(config: Config) -> bool:
     return False
 
 
+async def _check_restaurant_parallel(
+    client: OmakaseClient,
+    restaurant: RestaurantTarget,
+) -> list[dict]:
+    """Check availability for one restaurant using a parallel page.
+
+    Returns available slots, or empty list on error.
+    """
+    page = await client.create_parallel_page()
+    try:
+        # Temporarily swap the client's page for our parallel one
+        original_page = client._page
+        client._page = page
+
+        slots = await client.check_availability(restaurant)
+        return slots
+    except Exception:
+        logger.exception("Parallel check failed for %s", restaurant.name)
+        return []
+    finally:
+        client._page = original_page
+        await client.close_parallel_page(page)
+
+
+async def _check_all_availability(
+    client: OmakaseClient,
+    restaurants: list[RestaurantTarget],
+    max_concurrent: int,
+) -> dict[str, list[dict]]:
+    """Check availability for multiple restaurants in parallel.
+
+    Uses a semaphore to limit concurrency.
+
+    Returns:
+        Dict mapping restaurant URL -> list of available slots.
+    """
+    semaphore = asyncio.Semaphore(max_concurrent)
+    results: dict[str, list[dict]] = {}
+
+    async def _check_one(rest: RestaurantTarget):
+        async with semaphore:
+            logger.info("Parallel check: %s", rest.name)
+            slots = await _check_restaurant_parallel(client, rest)
+            results[rest.omakase_url] = slots
+
+    await asyncio.gather(*[_check_one(r) for r in restaurants])
+    return results
+
+
 async def run_booking_cycle(config: Config) -> bool:
     """Run one complete booking cycle for all restaurants.
+
+    Uses parallel browser contexts to check availability concurrently,
+    then processes matches sequentially (for booking/payment).
 
     Returns True if at least one booking was made.
     """
@@ -301,41 +415,64 @@ async def run_booking_cycle(config: Config) -> bool:
         # Step 1: Detect reservation open times (cached after first detection)
         await detect_open_times(client, config)
 
+        # Separate lottery vs first-come restaurants
+        lottery_restaurants = []
+        first_come_restaurants = []
         for restaurant in config.target_restaurants:
             if not restaurant.omakase_url:
                 continue
-
-            # Handle lottery-based restaurants
             if restaurant.booking_mode == "lottery":
-                logger.info("Lottery mode for %s", restaurant.name)
-                booking_url = await client.check_lottery_result(restaurant)
-                if booking_url:
-                    candidate_dates = _build_candidate_dates(config, restaurant)
-                    if candidate_dates:
-                        if await try_book_restaurant(client, restaurant, candidate_dates):
-                            any_booked = True
+                lottery_restaurants.append(restaurant)
+            else:
+                first_come_restaurants.append(restaurant)
+
+        # Handle lottery restaurants (sequential — each needs its own interaction)
+        for restaurant in lottery_restaurants:
+            logger.info("Lottery mode for %s", restaurant.name)
+            booking_url = await client.check_lottery_result(restaurant)
+            if booking_url:
+                candidate_dates = _build_candidate_dates(config, restaurant)
+                if candidate_dates:
+                    if await try_book_restaurant(client, restaurant, candidate_dates):
+                        any_booked = True
+            else:
+                await client.enter_lottery(restaurant)
+
+        # First-come restaurants: check availability in parallel
+        if first_come_restaurants:
+            # Build candidate dates for all restaurants upfront
+            restaurant_candidates: dict[str, list[tuple[datetime, list[str]]]] = {}
+            for restaurant in first_come_restaurants:
+                candidates = _build_candidate_dates(config, restaurant)
+                if candidates:
+                    restaurant_candidates[restaurant.omakase_url] = candidates
+                    logger.info("%d candidate dates for %s", len(candidates), restaurant.name)
                 else:
-                    await client.enter_lottery(restaurant)
-                continue
+                    logger.info("No candidate dates for %s", restaurant.name)
 
-            # First-come-first-served mode
-            # Step 2: Build candidate dates (user-specified + calendar)
-            logger.info("Building candidate dates for %s...", restaurant.name)
-            candidate_dates = _build_candidate_dates(config, restaurant)
+            bookable = [r for r in first_come_restaurants if r.omakase_url in restaurant_candidates]
 
-            if not candidate_dates:
-                logger.info("No candidate dates for %s", restaurant.name)
-                continue
+            if bookable:
+                # Parallel availability check
+                max_concurrent = min(config.max_concurrent_checks, len(bookable))
+                logger.info(
+                    "Checking %d restaurants in parallel (max %d concurrent)...",
+                    len(bookable), max_concurrent,
+                )
+                all_slots = await _check_all_availability(client, bookable, max_concurrent)
 
-            logger.info(
-                "%d candidate dates for %s",
-                len(candidate_dates),
-                restaurant.name,
-            )
+                # Process matches sequentially (booking requires the main page)
+                for restaurant in bookable:
+                    slots = all_slots.get(restaurant.omakase_url, [])
+                    if not slots:
+                        logger.info("No available slots for %s", restaurant.name)
+                        continue
 
-            # Steps 3-6: Check Omakase, match, book, pay
-            if await try_book_restaurant(client, restaurant, candidate_dates):
-                any_booked = True
+                    candidates = restaurant_candidates[restaurant.omakase_url]
+                    logger.info("%s: %d slots found, matching...", restaurant.name, len(slots))
+
+                    if await _try_book_from_slots(client, restaurant, candidates, slots):
+                        any_booked = True
 
     except OmakaseBookingError:
         logger.exception("Omakase login/session error")

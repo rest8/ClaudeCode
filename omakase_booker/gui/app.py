@@ -509,18 +509,35 @@ class OmakaseApp:
 
                 booked_this_cycle = False
 
+                # Parallel availability check for all restaurants
+                self._log(f"  {len(targets)} 件のレストランを並列チェック中...")
+                all_slots: dict[str, list[dict]] = {}
+                semaphore = asyncio.Semaphore(self.config.max_concurrent_checks)
+
+                async def _check_one(rest):
+                    async with semaphore:
+                        try:
+                            page = await client.create_parallel_page()
+                            orig = client._page
+                            client._page = page
+                            try:
+                                s = await client.check_availability(rest)
+                            finally:
+                                client._page = orig
+                                await client.close_parallel_page(page)
+                            all_slots[rest.omakase_url] = s
+                        except Exception as e:
+                            self._log(f"  [{rest.name}] チェックエラー: {e}")
+                            all_slots[rest.omakase_url] = []
+
+                if not self._stop_event.is_set():
+                    await asyncio.gather(*[_check_one(r) for r in targets])
+
                 for restaurant in targets:
                     if self._stop_event.is_set():
                         break
 
-                    self._log(f"  [{restaurant.name}] 確認中...")
-
-                    # Check availability
-                    try:
-                        slots = await client.check_availability(restaurant)
-                    except Exception as e:
-                        self._log(f"  [{restaurant.name}] エラー: {e}")
-                        continue
+                    slots = all_slots.get(restaurant.omakase_url, [])
 
                     if not slots:
                         self._log(f"  [{restaurant.name}] 空き枠なし")

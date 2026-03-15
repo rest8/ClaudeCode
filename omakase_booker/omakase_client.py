@@ -32,6 +32,15 @@ class OmakaseBookingError(Exception):
     """Raised when booking fails."""
 
 
+    # Resource types to block for faster page loads
+    BLOCKED_RESOURCE_TYPES = {"image", "font", "media"}
+    # URL patterns to block (analytics, tracking, ads)
+    BLOCKED_URL_PATTERNS = [
+        "google-analytics.com", "googletagmanager.com",
+        "facebook.net", "doubleclick.net", "ads",
+        "analytics", "tracking", ".woff", ".woff2",
+    ]
+
 class OmakaseClient:
     """Automated client for Omakase.in reservations."""
 
@@ -41,6 +50,7 @@ class OmakaseClient:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._extra_contexts: list[BrowserContext] = []
 
     async def start(self):
         """Launch browser and log in."""
@@ -48,7 +58,14 @@ class OmakaseClient:
         self._browser = await self._playwright.chromium.launch(
             headless=self.config.headless,
         )
-        self._context = await self._browser.new_context(
+        self._context = await self._new_context()
+        self._page = await self._context.new_page()
+        self._page.set_default_timeout(self.config.browser_timeout_ms)
+        await self._login()
+
+    async def _new_context(self) -> BrowserContext:
+        """Create a new browser context with shared settings and optional resource blocking."""
+        context = await self._browser.new_context(
             locale="ja-JP",
             timezone_id="Asia/Tokyo",
             user_agent=(
@@ -57,12 +74,54 @@ class OmakaseClient:
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
         )
-        self._page = await self._context.new_page()
-        self._page.set_default_timeout(self.config.browser_timeout_ms)
-        await self._login()
+        if self.config.block_unnecessary_resources:
+            await context.route("**/*", self._block_unnecessary)
+        return context
+
+    @staticmethod
+    async def _block_unnecessary(route):
+        """Abort requests for images, fonts, and tracking scripts."""
+        req = route.request
+        if req.resource_type in OmakaseClient.BLOCKED_RESOURCE_TYPES:
+            await route.abort()
+            return
+        url = req.url.lower()
+        for pattern in OmakaseClient.BLOCKED_URL_PATTERNS:
+            if pattern in url:
+                await route.abort()
+                return
+        await route.continue_()
+
+    async def create_parallel_page(self) -> Page:
+        """Create an isolated page (in a new context) for parallel operations.
+
+        The page shares the same browser instance and login cookies.
+        Caller should close the returned page when done via close_parallel_page().
+        """
+        ctx = await self._new_context()
+        # Copy cookies from main context so the parallel page is logged in
+        cookies = await self._context.cookies()
+        await ctx.add_cookies(cookies)
+        self._extra_contexts.append(ctx)
+        page = await ctx.new_page()
+        page.set_default_timeout(self.config.browser_timeout_ms)
+        return page
+
+    async def close_parallel_page(self, page: Page):
+        """Close a parallel page and its context."""
+        ctx = page.context
+        await ctx.close()
+        if ctx in self._extra_contexts:
+            self._extra_contexts.remove(ctx)
 
     async def close(self):
         """Clean up browser resources."""
+        for ctx in self._extra_contexts:
+            try:
+                await ctx.close()
+            except Exception:
+                pass
+        self._extra_contexts.clear()
         if self._browser:
             await self._browser.close()
         if self._playwright:

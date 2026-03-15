@@ -71,6 +71,8 @@ class Config:
     headless: bool = True
     browser_timeout_ms: int = 30000
     dry_run: bool = False  # Dry-run mode: skip actual payment
+    block_unnecessary_resources: bool = True  # Block images/fonts/CSS for faster loading
+    max_concurrent_checks: int = 3  # Max restaurants to check in parallel
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Config":

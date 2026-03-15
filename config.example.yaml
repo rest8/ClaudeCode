@@ -71,3 +71,5 @@ approval_fee_per_person: 390      # Seat reservation fee per person (JPY)
 headless: true                    # Set false for debugging (shows browser window)
 browser_timeout_ms: 30000
 dry_run: false                    # Set true to skip payment (動作検証用)
+block_unnecessary_resources: true  # Block images/fonts/CSS for faster page loads
+max_concurrent_checks: 3           # Max restaurants to check in parallel
