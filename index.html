@@ -7,9 +7,9 @@
   <meta name="description" content="株式会社五常は、BPO業務と経営コンサルティングを通じて、企業の成長と業務効率化を支援します。">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Noto+Serif+JP:wght@400;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=Zen+Kaku+Gothic+New:wght@300;400;500;700&display=swap" rel="stylesheet">
   <style>
-:root{--navy:#0a1628;--navy-dark:#060f1d;--navy-light:#132240;--navy-mid:#1a3058;--accent:#3b6cb5;--accent-light:#5a8fd4;--gold:#c4a265;--gold-light:#dcc088;--white:#fff;--gray-50:#f8f9fb;--gray-100:#f0f2f5;--gray-200:#e2e5eb;--gray-300:#c8cdd6;--gray-500:#6b7280;--gray-700:#374151;--gray-900:#111827;--font-sans:'Noto Sans JP',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--font-serif:'Noto Serif JP',serif;--transition:0.3s cubic-bezier(0.4,0,0.2,1)}
+:root{--navy:#0a1628;--navy-dark:#060f1d;--navy-light:#132240;--navy-mid:#1a3058;--accent:#3b6cb5;--accent-light:#5a8fd4;--gold:#c4a265;--gold-light:#dcc088;--white:#fff;--gray-50:#f8f9fb;--gray-100:#f0f2f5;--gray-200:#e2e5eb;--gray-300:#c8cdd6;--gray-500:#6b7280;--gray-700:#374151;--gray-900:#111827;--font-sans:'Zen Kaku Gothic New','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--font-serif:'Shippori Mincho','Inter',serif;--transition:0.3s cubic-bezier(0.4,0,0.2,1)}
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:80px}
 body{font-family:var(--font-sans);color:var(--gray-900);line-height:1.8;font-size:16px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
@@ -17,9 +17,11 @@ a{color:inherit;text-decoration:none}ul{list-style:none}img{max-width:100%;displ
 .container{max-width:1100px;margin:0 auto;padding:0 24px}.sp-only{display:none}
 .header{position:fixed;top:0;left:0;width:100%;z-index:1000;background:rgba(10,22,40,0.95);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,0.08);transition:var(--transition)}
 .header-inner{max-width:1200px;margin:0 auto;padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:72px}
-.logo{display:flex;align-items:baseline;gap:10px}
-.logo-main{font-family:var(--font-serif);font-size:26px;font-weight:700;color:var(--white);letter-spacing:0.1em}
-.logo-sub{font-size:11px;color:rgba(255,255,255,0.5);letter-spacing:0.08em;font-weight:300}
+.logo{display:flex;align-items:center;gap:12px}
+.logo-mark{flex-shrink:0}
+.logo-text-group{display:flex;flex-direction:column;gap:0}
+.logo-main{font-family:var(--font-serif);font-size:26px;font-weight:700;color:var(--white);letter-spacing:0.15em;line-height:1.2}
+.logo-sub{font-family:'Inter',sans-serif;font-size:10px;color:rgba(255,255,255,0.5);letter-spacing:0.12em;font-weight:400}
 .nav-list{display:flex;align-items:center;gap:32px}
 .nav-list a{font-size:14px;color:rgba(255,255,255,0.75);font-weight:400;letter-spacing:0.04em;transition:var(--transition);position:relative}
 .nav-list a::after{content:'';position:absolute;bottom:-4px;left:0;width:0;height:1px;background:var(--gold);transition:var(--transition)}
@@ -67,7 +69,9 @@ a{color:inherit;text-decoration:none}ul{list-style:none}img{max-width:100%;displ
 .service-card-header h3{font-family:var(--font-serif);font-size:24px;font-weight:700;margin-bottom:12px;letter-spacing:0.06em}
 .service-card-lead{font-size:14px;color:rgba(255,255,255,0.7);line-height:1.8;font-weight:300}
 .service-card-body{padding:32px}.service-list{display:flex;flex-direction:column;gap:20px}
-.service-list li{padding-left:16px;border-left:2px solid var(--gold)}
+.service-picto{margin-bottom:16px;opacity:0.9}
+.service-list li{padding-left:16px;border-left:2px solid var(--gold);display:flex;gap:12px;align-items:flex-start}
+.service-item-icon{flex-shrink:0;width:20px;height:20px;color:var(--accent);margin-top:2px}
 .service-list li strong{display:block;font-size:15px;font-weight:500;color:var(--navy);margin-bottom:4px}
 .service-list li p{font-size:13px;color:var(--gray-500);line-height:1.7}
 .strength{background:var(--gray-50)}.strength-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:24px}
@@ -109,8 +113,17 @@ a{color:inherit;text-decoration:none}ul{list-style:none}img{max-width:100%;displ
   <header class="header" id="header">
     <div class="header-inner">
       <a href="#" class="logo">
-        <span class="logo-main">五常</span>
-        <span class="logo-sub">GOJO Corporation</span>
+        <svg class="logo-mark" viewBox="0 0 60 64" width="36" height="38" xmlns="http://www.w3.org/2000/svg">
+          <rect x="8" y="2" width="44" height="8" rx="1" fill="#fff"/>
+          <rect x="8" y="16" width="44" height="8" rx="1" fill="#fff"/>
+          <rect x="2" y="30" width="56" height="4" rx="1" fill="#c4a265"/>
+          <rect x="8" y="38" width="44" height="8" rx="1" fill="#fff"/>
+          <rect x="8" y="52" width="44" height="8" rx="1" fill="#fff"/>
+        </svg>
+        <span class="logo-text-group">
+          <span class="logo-main">五常</span>
+          <span class="logo-sub">Gojo, Inc.</span>
+        </span>
       </a>
       <nav class="nav" id="nav">
         <ul class="nav-list">
@@ -215,6 +228,7 @@ a{color:inherit;text-decoration:none}ul{list-style:none}img{max-width:100%;displ
         <!-- BPO -->
         <div class="service-card" data-animate>
           <div class="service-card-header">
+            <svg class="service-picto" viewBox="0 0 48 48" fill="none" width="48" height="48"><rect x="6" y="6" width="36" height="36" rx="4" stroke="#c4a265" stroke-width="2"/><path d="M14 18h20M14 24h14M14 30h18" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
             <div class="service-number">01</div>
             <h3>BPO業務</h3>
             <p class="service-card-lead">業務プロセスのアウトソーシングで<br>コア業務に集中できる環境を</p>
@@ -222,20 +236,24 @@ a{color:inherit;text-decoration:none}ul{list-style:none}img{max-width:100%;displ
           <div class="service-card-body">
             <ul class="service-list">
               <li>
-                <strong>経理・財務代行</strong>
-                <p>記帳代行、請求書処理、経費精算、決算業務などの経理業務全般をサポート</p>
+                <div class="service-item-icon"><svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M2 6h20v14H2z" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v4M18 2v4M6 11h4v4H6z" stroke="currentColor" stroke-width="1.5"/></svg></div>
+                <div><strong>経理・財務代行</strong>
+                <p>記帳代行、請求書処理、経費精算、決算業務などの経理業務全般をサポート</p></div>
               </li>
               <li>
-                <strong>人事・労務代行</strong>
-                <p>給与計算、社会保険手続き、勤怠管理、入退社手続きなどを代行</p>
+                <div class="service-item-icon"><svg viewBox="0 0 24 24" fill="none" width="20" height="20"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke="currentColor" stroke-width="1.5"/></svg></div>
+                <div><strong>人事・労務代行</strong>
+                <p>給与計算、社会保険手続き、勤怠管理、入退社手続きなどを代行</p></div>
               </li>
               <li>
-                <strong>総務・庶務代行</strong>
-                <p>備品管理、契約書管理、各種事務手続きの効率化を支援</p>
+                <div class="service-item-icon"><svg viewBox="0 0 24 24" fill="none" width="20" height="20"><rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 7v10M12 10v7M16 5v12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+                <div><strong>総務・庶務代行</strong>
+                <p>備品管理、契約書管理、各種事務手続きの効率化を支援</p></div>
               </li>
               <li>
-                <strong>営業事務代行</strong>
-                <p>見積書・請求書作成、データ入力、顧客管理などの営業支援業務</p>
+                <div class="service-item-icon"><svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M3 17l6-6 4 4 8-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 7h6v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div><strong>営業事務代行</strong>
+                <p>見積書・請求書作成、データ入力、顧客管理などの営業支援業務</p></div>
               </li>
             </ul>
           </div>
@@ -244,6 +262,7 @@ a{color:inherit;text-decoration:none}ul{list-style:none}img{max-width:100%;displ
         <!-- Consulting -->
         <div class="service-card" data-animate>
           <div class="service-card-header">
+            <svg class="service-picto" viewBox="0 0 48 48" fill="none" width="48" height="48"><circle cx="24" cy="24" r="18" stroke="#c4a265" stroke-width="2"/><path d="M16 28l4-8 4 4 8-10" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="32" cy="14" r="3" stroke="#fff" stroke-width="1.5"/></svg>
             <div class="service-number">02</div>
             <h3>経営コンサルティング</h3>
             <p class="service-card-lead">経営課題の本質を見極め<br>持続的な成長戦略を策定</p>
@@ -251,20 +270,24 @@ a{color:inherit;text-decoration:none}ul{list-style:none}img{max-width:100%;displ
           <div class="service-card-body">
             <ul class="service-list">
               <li>
-                <strong>経営戦略立案</strong>
-                <p>事業環境分析、中期経営計画の策定、新規事業開発を支援</p>
+                <div class="service-item-icon"><svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M4 4h16v16H4z" stroke="currentColor" stroke-width="1.5"/><path d="M4 12h16M12 4v16" stroke="currentColor" stroke-width="1"/><circle cx="16" cy="8" r="2" fill="currentColor" opacity="0.3"/></svg></div>
+                <div><strong>経営戦略立案</strong>
+                <p>事業環境分析、中期経営計画の策定、新規事業開発を支援</p></div>
               </li>
               <li>
-                <strong>業務改善コンサルティング</strong>
-                <p>業務フローの可視化・分析、ボトルネック特定、改善施策の実行支援</p>
+                <div class="service-item-icon"><svg viewBox="0 0 24 24" fill="none" width="20" height="20"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                <div><strong>業務改善コンサルティング</strong>
+                <p>業務フローの可視化・分析、ボトルネック特定、改善施策の実行支援</p></div>
               </li>
               <li>
-                <strong>DX推進支援</strong>
-                <p>デジタル技術を活用した業務変革、システム導入・運用の最適化</p>
+                <div class="service-item-icon"><svg viewBox="0 0 24 24" fill="none" width="20" height="20"><rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 14l2-4 2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="16" cy="8" r="1.5" fill="currentColor"/></svg></div>
+                <div><strong>DX推進支援</strong>
+                <p>デジタル技術を活用した業務変革、システム導入・運用の最適化</p></div>
               </li>
               <li>
-                <strong>組織・人材コンサルティング</strong>
-                <p>組織設計、人事制度構築、人材育成プログラムの策定</p>
+                <div class="service-item-icon"><svg viewBox="0 0 24 24" fill="none" width="20" height="20"><circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><circle cx="17" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="1.5"/></svg></div>
+                <div><strong>組織・人材コンサルティング</strong>
+                <p>組織設計、人事制度構築、人材育成プログラムの策定</p></div>
               </li>
             </ul>
           </div>
@@ -406,8 +429,17 @@ a{color:inherit;text-decoration:none}ul{list-style:none}img{max-width:100%;displ
       <div class="footer-inner">
         <div class="footer-brand">
           <a href="#" class="logo footer-logo">
-            <span class="logo-main">五常</span>
-            <span class="logo-sub">GOJO Corporation</span>
+            <svg class="logo-mark" viewBox="0 0 60 64" width="30" height="32" xmlns="http://www.w3.org/2000/svg">
+              <rect x="8" y="2" width="44" height="8" rx="1" fill="#fff"/>
+              <rect x="8" y="16" width="44" height="8" rx="1" fill="#fff"/>
+              <rect x="2" y="30" width="56" height="4" rx="1" fill="#c4a265"/>
+              <rect x="8" y="38" width="44" height="8" rx="1" fill="#fff"/>
+              <rect x="8" y="52" width="44" height="8" rx="1" fill="#fff"/>
+            </svg>
+            <span class="logo-text-group">
+              <span class="logo-main">五常</span>
+              <span class="logo-sub">Gojo, Inc.</span>
+            </span>
           </a>
           <p class="footer-desc">BPO業務と経営コンサルティングで<br>企業の成長を支援します。</p>
         </div>
