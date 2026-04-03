@@ -31,11 +31,16 @@ if not exist .env (
     echo   notepad .env
 )
 
+REM Create desktop shortcut
+echo Creating desktop shortcut...
+python create_shortcut.py
+
 echo.
 echo === Setup complete! ===
 echo.
 echo Next steps:
 echo   1. Edit .env with your iFOREX email and password
-echo   2. Run: python main.py
+echo   2. Desktop shortcut "iFOREX 自動売買" をダブルクリックで起動
+echo      (or run: python launcher.py)
 echo.
 pause
