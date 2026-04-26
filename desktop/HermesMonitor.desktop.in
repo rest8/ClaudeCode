@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Hermes Monitor
+Name[ja]=エルメス在庫監視
+GenericName=Stock watcher
+Comment=Watch Hermes online for Kelly/Birkin/Picotin/Constance/Evelyne/Akkad
+Comment[ja]=エルメスオンラインを巡回し入荷時に通知
+Exec=__APP_DIR__/run.sh
+Icon=__APP_DIR__/assets/hermes-icon.svg
+Terminal=true
+StartupNotify=true
+Categories=Utility;Network;
+Keywords=hermes;kelly;birkin;stock;

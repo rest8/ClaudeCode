@@ -1,1 +1,5 @@
 requests>=2.31.0
+# Akamai/Cloudflare の TLS フィンガープリント対策 (Chrome 模倣)
+curl-cffi>=0.7.0
+# Cloudflare 専用フォールバック
+cloudscraper>=1.2.71

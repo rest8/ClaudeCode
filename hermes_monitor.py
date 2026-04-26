@@ -1,10 +1,18 @@
 """
-Hermes JP オンライン在庫監視 -> Google Chat 通知
+Hermes JP オンライン在庫監視 -> マルチ通知 (Google Chat / LINE)
 監視対象: ケリー / バーキン / ピコタン / コンスタンス / エヴリン / アッカド
 
+環境変数 (任意 / どれか1つは必須):
+  GOOGLE_CHAT_WEBHOOK   Google Chat Incoming Webhook URL
+  LINE_CHANNEL_TOKEN    LINE Messaging API のチャネルアクセストークン
+  LINE_TO               LINE 宛先 (userId / groupId / roomId)
+  HERMES_INTERVAL       秒数 (デフォルト 1)
+  HERMES_LOCALE         例: jp/ja, fr/fr, us/en
+  HERMES_PROXIES        プロキシのカンマ区切り (任意)
+  HERMES_JITTER         0.0-1.0 のジッタ率 (デフォルト 0.3)
+
 使い方:
-  export GOOGLE_CHAT_WEBHOOK="https://chat.googleapis.com/v1/spaces/.../messages?key=...&token=..."
-  python3 hermes_monitor.py [--interval 1] [--locale jp/ja]
+  python3 hermes_monitor.py
 """
 
 from __future__ import annotations
@@ -13,17 +21,22 @@ import argparse
 import json
 import logging
 import os
-import random
 import re
 import signal
 import sys
 import time
-from dataclasses import dataclass
 from typing import Iterable
 
-import requests
+from http_client import AntiBotClient
+from notifiers import (
+    GoogleChatNotifier,
+    LineNotifier,
+    MultiNotifier,
+    Notifier,
+    Product,
+)
 
-# ---- 監視対象 (日本語名 -> Hermes 検索キーワード) -------------------------
+# ---- 監視対象 (日本語名 -> 検索キーワード) -------------------------
 TARGETS: dict[str, str] = {
     "ケリー": "kelly",
     "バーキン": "birkin",
@@ -33,157 +46,55 @@ TARGETS: dict[str, str] = {
     "アッカド": "akkad",
 }
 
-# Hermes はロケールごとに URL が分かれる。デフォルトは日本 (jp/ja)
 DEFAULT_LOCALE = "jp/ja"
 SEARCH_API_TMPL = "https://www.hermes.com/api/{locale}/products/search"
 PRODUCT_URL_TMPL = "https://www.hermes.com{url}"
 
-# 一般的なブラウザに偽装 (Hermes は UA で簡易フィルタリングする)
-USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-    "(KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-]
-
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    level=os.getenv("HERMES_LOGLEVEL", "INFO"),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger("hermes")
 
 
-@dataclass(frozen=True)
-class Product:
-    sku: str
-    title: str
-    url: str
-    price: str
-    keyword_jp: str
-
-    def chat_card(self) -> dict:
-        """Google Chat のカード形式メッセージ"""
-        return {
-            "cards": [
-                {
-                    "header": {
-                        "title": f"🛍️ Hermes 入荷: {self.keyword_jp}",
-                        "subtitle": self.title,
-                    },
-                    "sections": [
-                        {
-                            "widgets": [
-                                {
-                                    "keyValue": {
-                                        "topLabel": "価格",
-                                        "content": self.price or "-",
-                                    }
-                                },
-                                {
-                                    "keyValue": {
-                                        "topLabel": "SKU",
-                                        "content": self.sku,
-                                    }
-                                },
-                                {
-                                    "buttons": [
-                                        {
-                                            "textButton": {
-                                                "text": "商品ページを開く",
-                                                "onClick": {
-                                                    "openLink": {"url": self.url}
-                                                },
-                                            }
-                                        }
-                                    ]
-                                },
-                            ]
-                        }
-                    ],
-                }
-            ],
-            "text": f"🛍️ {self.keyword_jp} 入荷: {self.title} {self.url}",
-        }
-
-
-class GoogleChatNotifier:
-    def __init__(self, webhook_url: str, session: requests.Session):
-        self.webhook_url = webhook_url
-        self.session = session
-
-    def notify(self, product: Product) -> None:
-        try:
-            r = self.session.post(
-                self.webhook_url,
-                json=product.chat_card(),
-                timeout=10,
-            )
-            if r.status_code >= 300:
-                log.warning("Google Chat 通知失敗 status=%s body=%s", r.status_code, r.text[:200])
-            else:
-                log.info("通知送信: %s (%s)", product.keyword_jp, product.title)
-        except requests.RequestException as e:
-            log.warning("Google Chat 通信エラー: %s", e)
-
-
 class HermesClient:
-    def __init__(self, locale: str, session: requests.Session):
+    def __init__(self, locale: str, http: AntiBotClient):
         self.locale = locale
-        self.session = session
+        self.http = http
         self.search_url = SEARCH_API_TMPL.format(locale=locale)
-
-    def _headers(self) -> dict:
-        return {
-            "User-Agent": random.choice(USER_AGENTS),
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-            "Referer": f"https://www.hermes.com/{self.locale}/",
-        }
+        self.base_url = f"https://www.hermes.com/{locale}/"
+        self.http.warmup(self.base_url)
 
     def search(self, keyword: str) -> list[Product]:
-        """検索 API を叩いて在庫ありの商品だけ返す"""
-        params = {
-            "locale": self.locale.replace("/", "_"),
-            "q": keyword,
-        }
+        params = {"locale": self.locale.replace("/", "_"), "q": keyword}
         try:
-            r = self.session.get(
-                self.search_url,
-                params=params,
-                headers=self._headers(),
-                timeout=15,
-            )
-        except requests.RequestException as e:
-            log.warning("検索エラー [%s]: %s", keyword, e)
+            r = self.http.get(self.search_url, params=params, referer=self.base_url)
+        except Exception as e:  # noqa: BLE001
+            log.warning("検索通信エラー [%s]: %s", keyword, e)
             return []
 
         if r.status_code == 429:
-            log.warning("レート制限 (429) - 間隔を広げてください")
+            log.warning("レート制限 (429) — 間隔を広げてください")
             return []
+        if r.status_code in (403, 401):
+            log.debug("ブロック疑い status=%s — HTML フォールバック", r.status_code)
+            return self._search_fallback(keyword)
         if r.status_code != 200:
             log.debug("非200応答 [%s] status=%s", keyword, r.status_code)
             return self._search_fallback(keyword)
 
         try:
-            data = r.json()
-        except ValueError:
+            data = r.json() if callable(getattr(r, "json", None)) else json.loads(r.text)
+        except (ValueError, TypeError):
             return self._search_fallback(keyword)
 
         return self._extract_products(data, keyword)
 
     def _search_fallback(self, keyword: str) -> list[Product]:
-        """JSON API が使えない場合は HTML 検索ページをパース"""
         url = f"https://www.hermes.com/{self.locale}/search/"
         try:
-            r = self.session.get(
-                url,
-                params={"s": keyword},
-                headers=self._headers(),
-                timeout=15,
-            )
-        except requests.RequestException:
+            r = self.http.get(url, params={"s": keyword}, referer=self.base_url)
+        except Exception:  # noqa: BLE001
             return []
         if r.status_code != 200:
             return []
@@ -191,7 +102,6 @@ class HermesClient:
 
     @staticmethod
     def _extract_products(payload: dict, keyword_jp_key: str) -> list[Product]:
-        """Hermes 検索 API の JSON から在庫ありの商品を抽出"""
         items = (
             payload.get("products", {}).get("items")
             or payload.get("items")
@@ -234,7 +144,6 @@ class HermesClient:
 
     @staticmethod
     def _extract_from_html(html: str, keyword_jp_key: str) -> list[Product]:
-        """HTML 内に埋め込まれた __NEXT_DATA__ などから商品情報を抽出"""
         m = re.search(
             r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.+?)</script>',
             html,
@@ -246,7 +155,6 @@ class HermesClient:
             data = json.loads(m.group(1))
         except ValueError:
             return []
-        # 構造は変動するため再帰的に "items" を探す
         items: list[dict] = []
 
         def walk(node):
@@ -270,17 +178,18 @@ class StockMonitor:
     def __init__(
         self,
         client: HermesClient,
-        notifier: GoogleChatNotifier,
+        notifier: Notifier,
         targets: dict[str, str],
         interval: float,
+        http: AntiBotClient,
     ):
         self.client = client
         self.notifier = notifier
         self.targets = targets
         self.interval = interval
-        # SKU 単位で通知済みを記録 (再入荷検知のため一定時間で揮発させる)
+        self.http = http
         self._seen: dict[str, float] = {}
-        self._cooldown_sec = 60 * 60  # 1時間以内の再通知は抑止
+        self._cooldown_sec = 60 * 60
         self._stop = False
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -303,7 +212,6 @@ class StockMonitor:
             products = self.client.search(kw)
             now = time.time()
             for p in products:
-                # キーワードが含まれない検索ノイズを除外
                 title_lc = p.title.lower()
                 if kw not in title_lc and jp not in p.title:
                     continue
@@ -313,34 +221,47 @@ class StockMonitor:
 
     def run(self) -> None:
         log.info(
-            "監視開始 interval=%.2fs targets=%s",
+            "監視開始 interval=%.2fs jitter=%.2f targets=%s",
             self.interval,
+            self.http.jitter,
             list(self.targets.keys()),
         )
         if self.interval < 5:
             log.warning(
-                "⚠ interval=%.2fs は非常に短く、Hermes 側のレート制限/IPブロックの"
-                "リスクが高いです。30〜60s を推奨します。",
+                "⚠ interval=%.2fs は短すぎます。Hermes 側のブロックを招きます。"
+                " 推奨は 30〜60 秒です。",
                 self.interval,
             )
         while not self._stop:
             start = time.monotonic()
             try:
                 self._tick()
-            except Exception as e:  # ループ全体は止めない
+            except Exception as e:  # noqa: BLE001
                 log.exception("巡回中エラー: %s", e)
             elapsed = time.monotonic() - start
             sleep = max(0.0, self.interval - elapsed)
-            # 1秒未満も切り捨てず正確にスリープ
             if sleep:
-                # 短時間 sleep でもシグナルに応答できるよう分割
                 end = time.monotonic() + sleep
                 while not self._stop and time.monotonic() < end:
+                    # ジッタ込みの細切れスリープでシグナル応答性も確保
                     time.sleep(min(0.2, end - time.monotonic()))
 
 
+def build_notifier(http: AntiBotClient, args) -> Notifier | None:
+    sinks: list[Notifier] = []
+    if args.webhook:
+        sinks.append(GoogleChatNotifier(args.webhook, http))
+        log.info("通知先: Google Chat")
+    if args.line_token and args.line_to:
+        sinks.append(LineNotifier(args.line_token, args.line_to, http))
+        log.info("通知先: LINE -> %s", args.line_to)
+    if not sinks:
+        return None
+    return MultiNotifier(sinks)
+
+
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Hermes 在庫監視 -> Google Chat 通知")
+    p = argparse.ArgumentParser(description="Hermes 在庫監視 -> Google Chat / LINE 通知")
     p.add_argument(
         "--interval",
         type=float,
@@ -355,29 +276,40 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--webhook",
         default=os.getenv("GOOGLE_CHAT_WEBHOOK"),
-        help="Google Chat Webhook URL (env GOOGLE_CHAT_WEBHOOK でも可)",
+        help="Google Chat Webhook URL (env GOOGLE_CHAT_WEBHOOK)",
+    )
+    p.add_argument(
+        "--line-token",
+        default=os.getenv("LINE_CHANNEL_TOKEN"),
+        help="LINE Messaging API channel token (env LINE_CHANNEL_TOKEN)",
+    )
+    p.add_argument(
+        "--line-to",
+        default=os.getenv("LINE_TO"),
+        help="LINE 宛先 userId/groupId (env LINE_TO)",
     )
     return p.parse_args(list(argv) if argv is not None else None)
 
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = parse_args(argv)
-    if not args.webhook:
+    http = AntiBotClient()
+    notifier = build_notifier(http, args)
+    if notifier is None:
         print(
-            "ERROR: Google Chat Webhook URL が指定されていません。\n"
-            "環境変数 GOOGLE_CHAT_WEBHOOK か --webhook で指定してください。",
+            "ERROR: 通知先が1つも指定されていません。\n"
+            "  GOOGLE_CHAT_WEBHOOK もしくは LINE_CHANNEL_TOKEN + LINE_TO を設定してください。",
             file=sys.stderr,
         )
         return 2
 
-    session = requests.Session()
-    client = HermesClient(locale=args.locale, session=session)
-    notifier = GoogleChatNotifier(webhook_url=args.webhook, session=session)
+    client = HermesClient(locale=args.locale, http=http)
     monitor = StockMonitor(
         client=client,
         notifier=notifier,
         targets=TARGETS,
         interval=args.interval,
+        http=http,
     )
     monitor.run()
     return 0

@@ -1,0 +1,21 @@
+[Unit]
+Description=Hermes Stock Monitor (Google Chat / LINE alerts)
+Documentation=https://github.com/rest8/ClaudeCode
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=-__APP_DIR__/.env
+ExecStart=__APP_DIR__/.venv/bin/python __APP_DIR__/hermes_monitor.py --interval 30
+Restart=always
+RestartSec=10
+StandardOutput=append:__APP_DIR__/hermes-monitor.log
+StandardError=append:__APP_DIR__/hermes-monitor.log
+# 安全のため最低限のサンドボックス
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
