@@ -165,51 +165,97 @@ class OmakaseCrawler:
         name/genre/area for ~660 popular cards), then probe sitemap.xml
         and visit any /r/<id> pages we haven't seen yet (catches the
         long tail). Results are deduplicated by omakase_id.
+
+        Each pagination request is opened in a *fresh* page (tab). This
+        matches the calibrate.py path that demonstrably gets distinct
+        content per page; reusing the SPA-resident page after the
+        initial /r load tends to leave omakase rendering page 1.
         """
         results: dict[str, RestaurantInfo] = {}
         with self._browser() as (_pw, _b, ctx):
+            # 1) Page 1 — also reads the pagination link to find max N.
             page = ctx.new_page()
-
-            # 1) Pagination — picks up most listings with full metadata.
             for url in LIST_URL_CANDIDATES:
                 try:
                     log.info("Fetching restaurant list from %s", url)
                     page.goto(url, wait_until="domcontentloaded")
-                    self._scrape_list_page(page, results, max_pages)
+                    page.wait_for_load_state(
+                        "networkidle", timeout=self.request_timeout_ms
+                    )
+                    _scroll_to_bottom(page)
+                    before = len(results)
+                    self._collect_items(page, results)
                     if results:
+                        log.info(
+                            "Page 1 (%s): %d items", page.url, len(results) - before
+                        )
                         break
                 except Exception as exc:  # noqa: BLE001
                     log.warning("List URL failed %s: %s", url, exc)
+            max_page = _find_max_page(page)
+            log.info("Pagination: max page = %d", max_page)
+            page.close()
+
+            # 2) Pages 2..N — open each in a fresh tab so the SPA can't
+            #    reuse cached state.
+            for n in range(2, min(max_page, max_pages) + 1):
+                np = ctx.new_page()
+                url = f"{BASE_URL}/r/page/{n}"
+                try:
+                    np.goto(url, wait_until="domcontentloaded")
+                    np.wait_for_load_state(
+                        "networkidle", timeout=self.request_timeout_ms
+                    )
+                    _scroll_to_bottom(np)
+                    before = len(results)
+                    self._collect_items(np, results)
+                    log.info(
+                        "Page %d (%s): %d new (total %d)",
+                        n,
+                        np.url,
+                        len(results) - before,
+                        len(results),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Page %d failed: %s", n, exc)
+                finally:
+                    np.close()
+
             log.info("After pagination: %d restaurants", len(results))
 
-            # 2) Sitemap fallback — discover IDs the listing didn't show.
+            # 3) Sitemap fallback — discover IDs the listing didn't show.
             try:
-                sitemap_ids = self._discover_via_sitemap(page)
-                missing = sorted(sitemap_ids - set(results.keys()))
-                if missing:
-                    log.info(
-                        "Sitemap discovered %d additional restaurant id(s); "
-                        "fetching their pages...",
-                        len(missing),
-                    )
-                    for i, rid in enumerate(missing, 1):
-                        info = self._fetch_one_restaurant(page, rid)
-                        if info is not None:
-                            results[rid] = info
-                        else:
-                            results[rid] = RestaurantInfo(
-                                omakase_id=rid,
-                                name=rid,
-                                url=f"{BASE_URL}/r/{rid}",
-                            )
-                        if i % 25 == 0:
-                            log.info(
-                                "Detail fetch progress: %d / %d",
-                                i,
-                                len(missing),
-                            )
-                else:
-                    log.info("Sitemap added no new restaurants.")
+                helper = ctx.new_page()
+                try:
+                    helper.goto(BASE_URL, wait_until="domcontentloaded")
+                    sitemap_ids = self._discover_via_sitemap(helper)
+                    missing = sorted(sitemap_ids - set(results.keys()))
+                    if missing:
+                        log.info(
+                            "Sitemap discovered %d additional restaurant id(s); "
+                            "fetching their pages...",
+                            len(missing),
+                        )
+                        for i, rid in enumerate(missing, 1):
+                            info = self._fetch_one_restaurant(helper, rid)
+                            if info is not None:
+                                results[rid] = info
+                            else:
+                                results[rid] = RestaurantInfo(
+                                    omakase_id=rid,
+                                    name=rid,
+                                    url=f"{BASE_URL}/r/{rid}",
+                                )
+                            if i % 25 == 0:
+                                log.info(
+                                    "Detail fetch progress: %d / %d",
+                                    i,
+                                    len(missing),
+                                )
+                    else:
+                        log.info("Sitemap added no new restaurants.")
+                finally:
+                    helper.close()
             except Exception as exc:  # noqa: BLE001
                 log.warning("Sitemap discovery failed: %s", exc)
 
@@ -302,122 +348,6 @@ class OmakaseCrawler:
         except Exception as exc:  # noqa: BLE001
             log.debug("fetch_one_restaurant(%s) failed: %s", rid, exc)
             return None
-
-    def _scrape_list_page(
-        self, page: Page, results: dict[str, RestaurantInfo], max_pages: int
-    ) -> None:
-        page.wait_for_load_state("networkidle", timeout=self.request_timeout_ms)
-        # In case the first page lazy-loads above the fold.
-        _scroll_to_bottom(page)
-
-        before = len(results)
-        self._collect_items(page, results)
-        log.info(
-            "Page 1 (%s): %d items", page.url, len(results) - before
-        )
-        max_page = _find_max_page(page)
-        log.info("Pagination: max page = %d", max_page)
-
-        for n in range(2, min(max_page, max_pages) + 1):
-            before = len(results)
-            if not self._navigate_to_page(page, n):
-                log.warning("Page %d: all navigation strategies failed", n)
-                break
-            _scroll_to_bottom(page)
-            self._collect_items(page, results)
-            log.info(
-                "Page %d (%s): %d new (total %d)",
-                n,
-                page.url,
-                len(results) - before,
-                len(results),
-            )
-
-    def _navigate_to_page(self, page: Page, n: int) -> bool:
-        """Try several strategies to load /r/page/<n>. Returns True if
-        any navigation succeeded (regardless of whether new content
-        appeared — content diff is logged by the caller)."""
-        timeout = self.request_timeout_ms
-
-        # Snapshot the first restaurant link so we can detect whether
-        # the page's content actually changes after navigation.
-        try:
-            before_href = page.evaluate(
-                """() => {
-                    const cards = document.querySelectorAll(
-                        'a[href*="/r/"]:not([href*="/page/"])'
-                    );
-                    return cards.length ? cards[0].href : '';
-                }"""
-            )
-        except Exception:  # noqa: BLE001
-            before_href = ""
-
-        navigated = False
-
-        # Strategy 1: click an existing pagination link on the current
-        # page. Works even when omakase's SPA routes /r/page/<n>
-        # client-side and ignores direct URL navigation.
-        for sel in (
-            f'a[href$="/r/page/{n}"]',
-            f'a[href$="?page={n}"]',
-            f'a[href*="page/{n}"]',
-        ):
-            try:
-                loc = page.locator(sel).first
-                if loc.count() == 0:
-                    continue
-                loc.scroll_into_view_if_needed(timeout=4000)
-                loc.click(timeout=4000)
-                navigated = True
-                break
-            except Exception as exc:  # noqa: BLE001
-                log.debug("click %s failed: %s", sel, exc)
-
-        # Strategy 2: direct URL navigation as fallback.
-        if not navigated:
-            for url in (
-                f"{BASE_URL}/r/page/{n}",
-                f"{BASE_URL}/r?page={n}",
-            ):
-                try:
-                    page.goto(url, wait_until="domcontentloaded")
-                    navigated = True
-                    break
-                except Exception as exc:  # noqa: BLE001
-                    log.debug("goto %s failed: %s", url, exc)
-
-        if not navigated:
-            return False
-
-        # Wait until the first card on the page actually points at a
-        # different restaurant — SPA hydration can lag well past the
-        # networkidle event.
-        try:
-            page.wait_for_function(
-                """(prev) => {
-                    const cards = document.querySelectorAll(
-                        'a[href*="/r/"]:not([href*="/page/"])'
-                    );
-                    if (cards.length === 0) return false;
-                    return cards[0].href !== prev;
-                }""",
-                arg=before_href,
-                timeout=12_000,
-            )
-        except Exception:  # noqa: BLE001
-            log.warning(
-                "Page %d: first card href did not change after %dms; "
-                "site may serve the same content for paginated URLs.",
-                n,
-                12_000,
-            )
-
-        try:
-            page.wait_for_load_state("networkidle", timeout=timeout)
-        except Exception:  # noqa: BLE001
-            pass
-        return True
 
     def _collect_items(
         self, page: Page, results: dict[str, RestaurantInfo]
