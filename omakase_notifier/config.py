@@ -1,4 +1,8 @@
-"""設定ファイルのロードと検証。"""
+"""アプリ全体の設定ロード（共通設定 + 認証情報のみ）。
+
+配信先と監視店舗は subscribers.yaml で管理し、店舗一覧は
+restaurants.json でキャッシュする。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,49 +13,28 @@ import yaml
 
 
 @dataclass
-class EmailConfig:
-    enabled: bool = False
+class EmailCredentials:
     smtp_host: str = ""
     smtp_port: int = 587
     use_tls: bool = True
     username: str = ""
     password: str = ""
     from_addr: str = ""
-    to_addrs: list[str] = field(default_factory=list)
 
 
 @dataclass
-class LineConfig:
-    enabled: bool = False
+class LineCredentials:
     channel_access_token: str = ""
-    to: str = ""
 
 
 @dataclass
-class WebhookConfig:
-    enabled: bool = False
-    url: str = ""
-
-
-@dataclass
-class NotificationConfig:
-    email: EmailConfig = field(default_factory=EmailConfig)
-    line: LineConfig = field(default_factory=LineConfig)
-    webhook: WebhookConfig = field(default_factory=WebhookConfig)
-
-
-@dataclass
-class TargetConfig:
-    name: str
-    url: str
-    dates: list[str] = field(default_factory=list)
-    times: list[str] = field(default_factory=list)
-    party_size: int | None = None
+class NotificationCredentials:
+    email: EmailCredentials = field(default_factory=EmailCredentials)
+    line: LineCredentials = field(default_factory=LineCredentials)
 
 
 @dataclass
 class AppConfig:
-    targets: list[TargetConfig]
     poll_interval_seconds: int = 90
     cookies: dict[str, str] = field(default_factory=dict)
     user_agent: str = (
@@ -59,35 +42,30 @@ class AppConfig:
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     )
-    notifications: NotificationConfig = field(default_factory=NotificationConfig)
+    notifications: NotificationCredentials = field(default_factory=NotificationCredentials)
+
     state_file: str = "state.json"
+    restaurants_file: str = "restaurants.json"
+    subscribers_file: str = "subscribers.yaml"
     log_file: str = "omakase_notifier.log"
     log_level: str = "INFO"
     tray_enabled: bool = True
 
-
-def _build_target(raw: dict[str, Any]) -> TargetConfig:
-    if "name" not in raw or "url" not in raw:
-        raise ValueError("target には name と url が必須です")
-    return TargetConfig(
-        name=raw["name"],
-        url=raw["url"],
-        dates=list(raw.get("dates") or []),
-        times=list(raw.get("times") or []),
-        party_size=raw.get("party_size"),
+    discover_index_urls: list[str] = field(
+        default_factory=lambda: ["https://omakase.in/ja/restaurants"]
     )
 
 
-def _build_notifications(raw: dict[str, Any]) -> NotificationConfig:
+def _build_credentials(raw: dict[str, Any]) -> NotificationCredentials:
     raw = raw or {}
     email_raw = raw.get("email") or {}
     line_raw = raw.get("line") or {}
-    webhook_raw = raw.get("webhook") or {}
-    return NotificationConfig(
-        email=EmailConfig(**{k: v for k, v in email_raw.items() if k in EmailConfig.__dataclass_fields__}),
-        line=LineConfig(**{k: v for k, v in line_raw.items() if k in LineConfig.__dataclass_fields__}),
-        webhook=WebhookConfig(
-            **{k: v for k, v in webhook_raw.items() if k in WebhookConfig.__dataclass_fields__}
+    return NotificationCredentials(
+        email=EmailCredentials(
+            **{k: v for k, v in email_raw.items() if k in EmailCredentials.__dataclass_fields__}
+        ),
+        line=LineCredentials(
+            **{k: v for k, v in line_raw.items() if k in LineCredentials.__dataclass_fields__}
         ),
     )
 
@@ -98,18 +76,18 @@ def load_config(path: str | Path) -> AppConfig:
         raise FileNotFoundError(f"設定ファイルが見つかりません: {p}")
     raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
 
-    targets_raw = raw.get("targets") or []
-    if not targets_raw:
-        raise ValueError("targets が空です。少なくとも1件の監視対象を設定してください")
-
     return AppConfig(
-        targets=[_build_target(t) for t in targets_raw],
         poll_interval_seconds=int(raw.get("poll_interval_seconds", 90)),
         cookies=dict(raw.get("cookies") or {}),
         user_agent=raw.get("user_agent") or AppConfig.__dataclass_fields__["user_agent"].default,
-        notifications=_build_notifications(raw.get("notifications") or {}),
+        notifications=_build_credentials(raw.get("notifications") or {}),
         state_file=raw.get("state_file", "state.json"),
+        restaurants_file=raw.get("restaurants_file", "restaurants.json"),
+        subscribers_file=raw.get("subscribers_file", "subscribers.yaml"),
         log_file=raw.get("log_file", "omakase_notifier.log"),
         log_level=raw.get("log_level", "INFO"),
         tray_enabled=bool(raw.get("tray_enabled", True)),
+        discover_index_urls=list(
+            raw.get("discover_index_urls") or ["https://omakase.in/ja/restaurants"]
+        ),
     )

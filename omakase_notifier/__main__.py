@@ -1,13 +1,24 @@
-"""エントリポイント: `python -m omakase_notifier --config config.yaml`。"""
+"""エントリポイント。
+
+サブコマンド一覧:
+  run (default)        監視を開始
+  discover             店舗一覧をクロール
+  restaurants          店舗キャッシュを表示/検索
+  subscribers          配信先一覧
+  add-subscriber       配信先を追加
+  remove-subscriber    配信先を削除
+  subscribe            店舗を購読
+  unsubscribe          購読を解除
+"""
 from __future__ import annotations
 
-import argparse
 import logging
 import signal
 import sys
 import threading
 
 from .app import App
+from .cli import COMMANDS, build_parser
 from .config import load_config
 from .logging_setup import setup_logging
 from .tray import run_tray
@@ -15,30 +26,11 @@ from .tray import run_tray
 LOGGER = logging.getLogger(__name__)
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Omakase 空席通知アプリ")
-    parser.add_argument("--config", default="config.yaml", help="設定ファイル (YAML)")
-    parser.add_argument(
-        "--once", action="store_true", help="1回だけチェックして終了 (テスト用)"
-    )
-    parser.add_argument(
-        "--no-tray", action="store_true", help="システムトレイを無効化"
-    )
-    args = parser.parse_args(argv)
-
-    try:
-        config = load_config(args.config)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"設定エラー: {e}", file=sys.stderr)
-        return 2
-
-    setup_logging(config.log_file, config.log_level)
-    LOGGER.info("起動: config=%s", args.config)
-
+def _run_app(config, once: bool, no_tray: bool) -> int:
     app = App(config)
 
-    if args.once:
-        app._check_all()  # noqa: SLF001 - テスト用に内部メソッドを直接呼ぶ
+    if once:
+        app.check_all()
         return 0
 
     def _handle_signal(signum, _frame) -> None:
@@ -54,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     worker = threading.Thread(target=app.run, name="poller", daemon=True)
     worker.start()
 
-    if config.tray_enabled and not args.no_tray:
+    if config.tray_enabled and not no_tray:
         try:
             run_tray(on_quit=app.stop, on_check_now=app.trigger_check_now)
         except Exception as e:  # noqa: BLE001
@@ -66,6 +58,32 @@ def main(argv: list[str] | None = None) -> int:
     app.stop()
     worker.join(timeout=5)
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        config = load_config(args.config)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"設定エラー: {e}", file=sys.stderr)
+        return 2
+
+    setup_logging(config.log_file, config.log_level)
+
+    cmd = args.command or "run"
+    if cmd == "run":
+        once = bool(getattr(args, "once", False))
+        no_tray = bool(getattr(args, "no_tray", False))
+        LOGGER.info("起動: config=%s once=%s no_tray=%s", args.config, once, no_tray)
+        return _run_app(config, once=once, no_tray=no_tray)
+
+    handler = COMMANDS.get(cmd)
+    if handler is None:
+        parser.print_help()
+        return 2
+    return handler(config, args)
 
 
 if __name__ == "__main__":

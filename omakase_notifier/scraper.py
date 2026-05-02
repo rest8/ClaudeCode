@@ -1,15 +1,8 @@
-"""Omakase の店舗ページから空席情報を取得する。
+"""店舗ページから空席情報を抽出する。
 
-Omakase の HTML / API レスポンスは公開仕様がないため、本実装では
-以下の汎用的なヒューリスティクスで空席を抽出する:
-
-1. 店舗カレンダーページ HTML を取得
-2. JSON-LD / data-* 属性 / data 埋め込み JSON から候補を探す
-3. それらが取れない場合は、HTML 上の "空席あり" を示すクラス名や
-   日付セルから空席候補を抽出
-
-サイト側の構造変更に追従できるよう、抽出ロジックは
-SLOT_PATTERNS / AVAILABILITY_KEYWORDS 等を編集して調整できる。
+Omakase の HTML 構造は公開仕様がないため、本実装では
+JSON-LD / data-* 属性 / カレンダーセル等を横断的に解析する
+ヒューリスティックなアプローチを取る。
 """
 from __future__ import annotations
 
@@ -22,11 +15,8 @@ from typing import Iterable
 import requests
 from bs4 import BeautifulSoup
 
-from .config import AppConfig, TargetConfig
-
 LOGGER = logging.getLogger(__name__)
 
-# 「空席あり」を示しそうな日本語/英語キーワード
 AVAILABILITY_KEYWORDS = (
     "available",
     "空席",
@@ -36,9 +26,7 @@ AVAILABILITY_KEYWORDS = (
     "◯",
 )
 
-# ISO 形式の日付を検出する正規表現
 DATE_RE = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\b")
-# HH:MM
 TIME_RE = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
 
 
@@ -46,8 +34,8 @@ TIME_RE = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
 class AvailabilitySlot:
     """空席1件を表す。"""
 
-    date: str  # YYYY-MM-DD
-    time: str | None = None  # HH:MM
+    date: str
+    time: str | None = None
     party_size: int | None = None
     raw: str = ""
 
@@ -64,39 +52,35 @@ class AvailabilitySlot:
 
 
 class OmakaseScraper:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, user_agent: str, cookies: dict[str, str] | None = None) -> None:
         self._session = requests.Session()
         self._session.headers.update(
             {
-                "User-Agent": config.user_agent,
+                "User-Agent": user_agent,
                 "Accept-Language": "ja,en-US;q=0.8,en;q=0.5",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             }
         )
-        for k, v in config.cookies.items():
+        for k, v in (cookies or {}).items():
             self._session.cookies.set(k, v)
 
-    def fetch(self, target: TargetConfig) -> set[AvailabilitySlot]:
-        LOGGER.debug("fetch: %s -> %s", target.name, target.url)
+    def fetch_url(self, url: str) -> set[AvailabilitySlot]:
+        LOGGER.debug("fetch_url: %s", url)
         try:
-            resp = self._session.get(target.url, timeout=20)
+            resp = self._session.get(url, timeout=20)
             resp.raise_for_status()
         except requests.RequestException as e:
-            LOGGER.warning("HTTP取得に失敗: %s (%s)", target.name, e)
+            LOGGER.warning("HTTP取得に失敗: %s (%s)", url, e)
             return set()
-
-        slots = self._parse(resp.text)
-        return self._filter(slots, target)
+        return self._parse(resp.text)
 
     def _parse(self, html: str) -> set[AvailabilitySlot]:
         soup = BeautifulSoup(html, "html.parser")
         slots: set[AvailabilitySlot] = set()
-
         slots |= self._parse_jsonld(soup)
         slots |= self._parse_inline_json(soup)
         slots |= self._parse_data_attributes(soup)
         slots |= self._parse_calendar_cells(soup)
-
         return slots
 
     def _parse_jsonld(self, soup: BeautifulSoup) -> set[AvailabilitySlot]:
@@ -110,7 +94,6 @@ class OmakaseScraper:
         return out
 
     def _parse_inline_json(self, soup: BeautifulSoup) -> set[AvailabilitySlot]:
-        """`<script>window.__INITIAL_STATE__ = {...}</script>` 等を拾う。"""
         out: set[AvailabilitySlot] = set()
         for tag in soup.find_all("script"):
             text = tag.string
@@ -143,7 +126,6 @@ class OmakaseScraper:
         return out
 
     def _parse_calendar_cells(self, soup: BeautifulSoup) -> set[AvailabilitySlot]:
-        """カレンダー風UI: `.available` クラス等が付いたセルを拾う。"""
         out: set[AvailabilitySlot] = set()
         selectors = [
             ".available",
@@ -194,10 +176,9 @@ class OmakaseScraper:
             return None
         if isinstance(date, str):
             m = DATE_RE.search(date)
-            if m:
-                date = m.group(1)
-            else:
+            if not m:
                 return None
+            date = m.group(1)
         else:
             return None
 
@@ -247,21 +228,23 @@ class OmakaseScraper:
         m = TIME_RE.search(text or "")
         return f"{int(m.group(1)):02d}:{m.group(2)}" if m else None
 
-    @staticmethod
-    def _filter(slots: Iterable[AvailabilitySlot], target: TargetConfig) -> set[AvailabilitySlot]:
-        out: set[AvailabilitySlot] = set()
-        wanted_dates = set(target.dates)
-        wanted_times = set(target.times)
-        for s in slots:
-            if wanted_dates and s.date not in wanted_dates:
-                continue
-            if wanted_times and (s.time is None or s.time not in wanted_times):
-                continue
-            if (
-                target.party_size is not None
-                and s.party_size is not None
-                and s.party_size < target.party_size
-            ):
-                continue
-            out.add(s)
-        return out
+
+def filter_slots(
+    slots: Iterable[AvailabilitySlot],
+    dates: list[str],
+    times: list[str],
+    party_size: int | None,
+) -> list[AvailabilitySlot]:
+    """購読者の条件で空席をフィルタ。"""
+    wanted_dates = set(dates)
+    wanted_times = set(times)
+    out: list[AvailabilitySlot] = []
+    for s in slots:
+        if wanted_dates and s.date not in wanted_dates:
+            continue
+        if wanted_times and (s.time is None or s.time not in wanted_times):
+            continue
+        if party_size is not None and s.party_size is not None and s.party_size < party_size:
+            continue
+        out.append(s)
+    return out

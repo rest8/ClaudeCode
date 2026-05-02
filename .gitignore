@@ -7,6 +7,8 @@ venv/
 
 # App runtime
 config.yaml
+subscribers.yaml
+restaurants.json
 state.json
 *.log
 

@@ -1,67 +1,46 @@
-# Omakase 空席通知アプリ 設定ファイル
+# Omakase 空席通知アプリ - 共通設定
 #
-# このファイルを config.yaml にコピーして編集してください。
-
-# 監視対象（複数指定可）
-targets:
-  - name: "店舗A"
-    # ブラウザDevToolsで確認した、店舗予約カレンダーのURLを指定
-    # 例: https://omakase.in/ja/r/xxxxxxxx
-    url: "https://omakase.in/ja/r/REPLACE_ME"
-    # 監視したい日付（YYYY-MM-DD）。省略時はカレンダー全体の任意の空席を監視
-    dates:
-      - "2026-05-15"
-      - "2026-05-22"
-    # 監視したい時間帯（HH:MM）。省略時は時間帯を問わず空席を監視
-    times: []
-    # 監視したい人数。指定すると人数に対する空席のみを通知
-    party_size: 2
+# このファイルを `config.yaml` にコピーして編集してください。
+# 配信先と購読店舗は CLI で `subscribers.yaml` に追加します:
+#   python -m omakase_notifier add-subscriber --id me --channel email --to me@x.com
+#   python -m omakase_notifier subscribe me <restaurant_id> --date 2026-05-15 --party-size 2
 
 # ポーリング間隔（秒）。短すぎるとサイトに負荷をかけるため60秒以上推奨
 poll_interval_seconds: 90
 
-# 認証Cookie（必要な場合のみ）
-# ブラウザでOmakaseにログインした後、DevTools > Application > Cookies から
-# 必要なCookieをコピーして key: value 形式で記述してください
+# 店舗一覧クロール時の起点 URL（複数指定可）
+discover_index_urls:
+  - "https://omakase.in/ja/restaurants"
+
+# 認証 Cookie（ログイン必須ページを取得する場合）
+# ブラウザで Omakase にログイン後 DevTools > Application > Cookies からコピー
 cookies: {}
   # _omakase_session: "xxxxxxxxxxxxxxxx"
 
-# User-Agent（指定推奨）
 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
-# 通知設定（複数チャネル併用可）
+# 通知認証情報（チャネル単位の共通設定）。
+# 個別の宛先 (to_addr / userId / webhook URL) は subscribers.yaml に書きます。
 notifications:
   email:
-    enabled: false
     smtp_host: "smtp.gmail.com"
     smtp_port: 587
     use_tls: true
     username: "you@example.com"
-    # Gmailの場合はアプリパスワードを使用
+    # Gmail はアプリパスワードを使用
     password: "REPLACE_ME"
     from_addr: "you@example.com"
-    to_addrs:
-      - "you@example.com"
 
   line:
-    enabled: false
-    # LINE Messaging API のチャネルアクセストークン
-    # https://developers.line.biz/console/ で取得
+    # LINE Messaging API のチャネルアクセストークン (長期)
+    # https://developers.line.biz/console/ で発行
     channel_access_token: "REPLACE_ME"
-    # 通知先のユーザID/グループID
-    to: "REPLACE_ME"
 
-  webhook:
-    enabled: false
-    # 任意のwebhook URL（Slack/Discord/ntfy.sh 等）
-    url: "https://example.com/webhook"
-
-# 状態保存ファイル（前回検知した空席との差分判定に使用）
+# 永続化ファイル
 state_file: "state.json"
+restaurants_file: "restaurants.json"
+subscribers_file: "subscribers.yaml"
 
-# ログファイル
 log_file: "omakase_notifier.log"
 log_level: "INFO"
-
-# システムトレイ常駐（GUI環境で動作）
 tray_enabled: true

@@ -1,14 +1,15 @@
-"""アプリケーション本体: ポーリングループと通知ディスパッチ。"""
+"""ポーリング本体: 監視対象店舗を1回だけ取得し、配信先ごとに通知。"""
 from __future__ import annotations
 
 import logging
 import threading
-import time
 
 from .config import AppConfig
 from .notifier import Notifier
-from .scraper import OmakaseScraper
+from .restaurants import RestaurantDirectory
+from .scraper import OmakaseScraper, filter_slots
 from .state import StateStore
+from .subscribers import SubscriberStore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -16,9 +17,11 @@ LOGGER = logging.getLogger(__name__)
 class App:
     def __init__(self, config: AppConfig) -> None:
         self._config = config
-        self._scraper = OmakaseScraper(config)
+        self._scraper = OmakaseScraper(user_agent=config.user_agent, cookies=config.cookies)
         self._notifier = Notifier(config.notifications)
         self._state = StateStore(config.state_file)
+        self._restaurants = RestaurantDirectory(config.restaurants_file)
+        self._subscribers = SubscriberStore(config.subscribers_file)
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
 
@@ -33,33 +36,60 @@ class App:
 
     def run(self) -> None:
         LOGGER.info(
-            "監視開始: %d店舗 / 間隔=%d秒",
-            len(self._config.targets),
+            "監視開始: 配信先=%d / 対象店舗=%d / 間隔=%d秒",
+            len(self._subscribers.all()),
+            len(self._subscribers.watched_restaurant_ids()),
             self._config.poll_interval_seconds,
         )
         while not self._stop_event.is_set():
-            self._check_all()
+            self.check_all()
             self._wake_event.wait(timeout=self._config.poll_interval_seconds)
             self._wake_event.clear()
         LOGGER.info("監視終了")
 
-    def _check_all(self) -> None:
-        for target in self._config.targets:
-            try:
-                slots = self._scraper.fetch(target)
-            except Exception as e:  # noqa: BLE001
-                LOGGER.exception("取得エラー: %s (%s)", target.name, e)
-                continue
+    def check_all(self) -> None:
+        watched = self._subscribers.watched_restaurant_ids()
+        if not watched:
+            LOGGER.debug("監視対象なし")
+            return
+        for rid in watched:
+            self._check_restaurant(rid)
 
-            current_keys = {s.key() for s in slots}
-            previous_keys = self._state.previous_slots(target.name)
+    def _check_restaurant(self, restaurant_id: str) -> None:
+        info = self._restaurants.get(restaurant_id)
+        if info is None:
+            LOGGER.warning(
+                "店舗情報未登録: %s (`discover` を実行してください)", restaurant_id
+            )
+            return
+        try:
+            slots = self._scraper.fetch_url(info.url)
+        except Exception as e:  # noqa: BLE001
+            LOGGER.exception("取得エラー: %s (%s)", info.name, e)
+            return
+
+        for sub in self._subscribers.subscribers_for_restaurant(restaurant_id):
+            subscription = sub.find_subscription(restaurant_id)
+            if subscription is None:
+                continue
+            filtered = filter_slots(
+                slots,
+                dates=subscription.dates,
+                times=subscription.times,
+                party_size=subscription.party_size,
+            )
+            current_keys = {s.key() for s in filtered}
+            previous_keys = self._state.previous(sub.id, restaurant_id)
             new_keys = current_keys - previous_keys
 
             if new_keys:
-                new_slots = [s for s in slots if s.key() in new_keys]
-                LOGGER.info("空席検知: %s -> %d件 新規", target.name, len(new_slots))
-                self._notifier.notify(target.name, new_slots)
-            else:
-                LOGGER.debug("空席変化なし: %s (%d件)", target.name, len(current_keys))
+                new_slots = [s for s in filtered if s.key() in new_keys]
+                LOGGER.info(
+                    "空席検知: %s -> %s (%d件)",
+                    sub.id,
+                    info.name,
+                    len(new_slots),
+                )
+                self._notifier.notify(sub, info.name, info.url, new_slots)
 
-            self._state.update(target.name, current_keys)
+            self._state.update(sub.id, restaurant_id, current_keys)

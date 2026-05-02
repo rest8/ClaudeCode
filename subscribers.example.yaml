@@ -1,0 +1,26 @@
+# 配信先と監視店舗の管理ファイル。
+# CLI コマンドで自動的に追記/編集されますが、手動編集も可能です。
+#
+# 例:
+subscribers:
+  - id: alice
+    label: "Alice"
+    channel: email           # email | line | webhook
+    destination: "alice@example.com"
+    subscriptions:
+      - restaurant_id: "abc123"     # restaurants.json の id を指定
+        dates:
+          - "2026-05-15"
+          - "2026-05-22"
+        party_size: 2
+
+  - id: bob_line
+    label: "Bob (LINE)"
+    channel: line
+    destination: "U1234567890abcdef"   # LINE userId / groupId
+    subscriptions:
+      - restaurant_id: "abc123"
+        dates: []                       # 空 = 任意の日付
+        times: ["19:00", "19:30"]
+        party_size: 4
+      - restaurant_id: "def456"
