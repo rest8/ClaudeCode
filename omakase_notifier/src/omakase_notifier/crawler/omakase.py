@@ -37,15 +37,17 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://omakase.in"
 LIST_URL_CANDIDATES = [
+    "https://omakase.in/ja",
     "https://omakase.in/ja/restaurants",
-    "https://omakase.in/ja/r",
     "https://omakase.in/",
 ]
 
 # These selectors are starting points. Run the calibrate script to verify
 # them against the live site.
 LIST_SELECTORS = {
-    "restaurant_link": 'a[href*="/r/"], a[href*="/restaurants/"]',
+    # Restaurant detail pages on omakase.in are /r/<lowercase letters + digits>
+    # — exclude category links like /r/takeaway?...
+    "restaurant_link": 'a[href*="/r/"]',
     "restaurant_name": "h1, h2, .restaurant-name, [data-testid='restaurant-name']",
     "next_page": 'a[rel="next"], a.pagination-next',
 }
@@ -118,26 +120,39 @@ class OmakaseCrawler:
     def _scrape_list_page(
         self, page: Page, results: dict[str, RestaurantInfo], max_pages: int
     ) -> None:
+        page.wait_for_load_state("networkidle", timeout=self.request_timeout_ms)
+        # omakase.in uses infinite scroll, so scroll to the bottom to
+        # force lazy-loaded restaurants into the DOM.
+        _scroll_to_bottom(page)
         for _ in range(max_pages):
-            page.wait_for_load_state("networkidle", timeout=self.request_timeout_ms)
             anchors = page.query_selector_all(LIST_SELECTORS["restaurant_link"])
             for a in anchors:
                 href = a.get_attribute("href")
                 if not href:
                     continue
-                full_url = urljoin(BASE_URL, href)
+                full_url = urljoin(BASE_URL, href.split("?")[0])
                 rid = _extract_restaurant_id(full_url)
                 if not rid or rid in results:
                     continue
-                name = (a.inner_text() or "").strip() or rid
+                text = (a.inner_text() or "").strip()
+                name, genre, area = _parse_link_text(text)
+                if not name:
+                    continue
                 results[rid] = RestaurantInfo(
-                    omakase_id=rid, name=name, url=full_url
+                    omakase_id=rid,
+                    name=name,
+                    url=full_url,
+                    genre=genre,
+                    area=area,
                 )
+            # If a "next page" link is present, follow it (some sub-views).
             next_btn = page.query_selector(LIST_SELECTORS["next_page"])
             if not next_btn:
                 return
             try:
                 next_btn.click()
+                page.wait_for_load_state("networkidle", timeout=self.request_timeout_ms)
+                _scroll_to_bottom(page)
             except Exception:  # noqa: BLE001
                 return
 
@@ -199,12 +214,54 @@ class OmakaseCrawler:
 
 # -------- Helpers --------
 
-_RESTAURANT_ID_RE = re.compile(r"/(?:r|restaurants)/([A-Za-z0-9_-]+)")
+# omakase.in restaurant ids look like "qk294214" — letters then digits.
+# This deliberately excludes routes like /r/takeaway?togo_type=...
+_RESTAURANT_ID_RE = re.compile(r"/r/([a-z]+\d+)(?:[/?#]|$)")
+_NAME_PATTERN = re.compile(
+    r"^(?P<name>[^\n]+)\n(?P<genre>[^/]+?)\s*/\s*(?P<area>.+?)\s*$",
+    re.DOTALL,
+)
 
 
 def _extract_restaurant_id(url: str) -> Optional[str]:
     m = _RESTAURANT_ID_RE.search(url)
     return m.group(1) if m else None
+
+
+def _parse_link_text(text: str) -> tuple[str, Optional[str], Optional[str]]:
+    """Parse omakase.in's anchor text:
+        '<店舗名>\\n<ジャンル>  /  <都道府県>'
+    Returns (name, genre, area). genre/area may be None if the text is
+    just a single line.
+    """
+    if not text:
+        return "", None, None
+    text = text.strip()
+    m = _NAME_PATTERN.match(text)
+    if m:
+        return (
+            m.group("name").strip(),
+            m.group("genre").strip() or None,
+            m.group("area").strip() or None,
+        )
+    return text.split("\n", 1)[0].strip(), None, None
+
+
+def _scroll_to_bottom(page) -> None:
+    """Force omakase.in's infinite-scroll list to fully load."""
+    last_count = -1
+    for _ in range(40):  # safety cap; ~40 viewports is typically enough
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        page.wait_for_timeout(700)
+        try:
+            count = page.evaluate(
+                "document.querySelectorAll('a[href*=\"/r/\"]').length"
+            )
+        except Exception:  # noqa: BLE001
+            return
+        if count == last_count:
+            return
+        last_count = count
 
 
 def _text_or_none(el) -> Optional[str]:
