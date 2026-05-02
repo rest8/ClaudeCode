@@ -1,0 +1,14 @@
+# Optional native-window experience.
+#
+# Install on top of requirements.txt only when you want a chromeless
+# WebView2 window instead of opening in the default browser:
+#
+#   pip install -r requirements-desktop.txt
+#
+# Note (2026-05): pythonnet, a transitive dependency of pywebview on
+# Windows, does not yet ship wheels for Python 3.14. If your runtime
+# is 3.14 the install will fall back to a source build and fail. Use
+# Python 3.13 for the native-window mode, or skip this file and run
+# in the browser-fallback mode.
+
+pywebview>=5.3
