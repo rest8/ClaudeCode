@@ -259,29 +259,67 @@ class OmakaseCrawler:
         # In case the first page lazy-loads above the fold.
         _scroll_to_bottom(page)
 
+        before = len(results)
         self._collect_items(page, results)
+        log.info(
+            "Page 1 (%s): %d items", page.url, len(results) - before
+        )
         max_page = _find_max_page(page)
         log.info("Pagination: max page = %d", max_page)
 
         for n in range(2, min(max_page, max_pages) + 1):
-            page_url = f"{BASE_URL}/r/page/{n}"
-            try:
-                page.goto(page_url, wait_until="domcontentloaded")
-                page.wait_for_load_state(
-                    "networkidle", timeout=self.request_timeout_ms
-                )
-                _scroll_to_bottom(page)
-                before = len(results)
-                self._collect_items(page, results)
-                log.info(
-                    "Page %d: %d new (total %d)",
-                    n,
-                    len(results) - before,
-                    len(results),
-                )
-            except Exception as exc:  # noqa: BLE001
-                log.warning("Page %d failed: %s", n, exc)
+            before = len(results)
+            if not self._navigate_to_page(page, n):
+                log.warning("Page %d: all navigation strategies failed", n)
                 break
+            _scroll_to_bottom(page)
+            self._collect_items(page, results)
+            log.info(
+                "Page %d (%s): %d new (total %d)",
+                n,
+                page.url,
+                len(results) - before,
+                len(results),
+            )
+
+    def _navigate_to_page(self, page: Page, n: int) -> bool:
+        """Try several strategies to load /r/page/<n>. Returns True if
+        any navigation succeeded (regardless of whether new content
+        appeared — content diff is logged by the caller)."""
+        timeout = self.request_timeout_ms
+
+        # Strategy 1: click an existing pagination link on the current
+        # page. Works even when omakase's SPA routes /r/page/<n>
+        # client-side and ignores direct URL navigation.
+        for sel in (
+            f'a[href$="/r/page/{n}"]',
+            f'a[href$="?page={n}"]',
+            f'a[href*="page/{n}"]',
+        ):
+            try:
+                loc = page.locator(sel).first
+                if loc.count() == 0:
+                    continue
+                loc.scroll_into_view_if_needed(timeout=4000)
+                loc.click(timeout=4000)
+                page.wait_for_load_state("networkidle", timeout=timeout)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                log.debug("click %s failed: %s", sel, exc)
+
+        # Strategy 2: direct URL navigation (/r/page/<n>).
+        for url in (
+            f"{BASE_URL}/r/page/{n}",
+            f"{BASE_URL}/r?page={n}",
+        ):
+            try:
+                page.goto(url, wait_until="domcontentloaded")
+                page.wait_for_load_state("networkidle", timeout=timeout)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                log.debug("goto %s failed: %s", url, exc)
+
+        return False
 
     def _collect_items(
         self, page: Page, results: dict[str, RestaurantInfo]
