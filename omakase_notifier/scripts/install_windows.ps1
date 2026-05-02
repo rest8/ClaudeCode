@@ -36,8 +36,8 @@ Write-Host "[omakase] upgrading pip..."
 Write-Host "[omakase] installing requirements..."
 & $pip install -r requirements.txt | Out-Host
 
-Write-Host "[omakase] installing Playwright Chromium..."
-& $py -m playwright install chromium | Out-Host
+Write-Host "[omakase] installing Playwright browsers (chromium + headless shell)..."
+& $py -m playwright install chromium chromium-headless-shell | Out-Host
 
 # 2. config.yaml
 if (-not (Test-Path "config.yaml")) {
