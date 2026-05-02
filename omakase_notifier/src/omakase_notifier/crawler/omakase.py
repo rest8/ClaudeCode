@@ -122,40 +122,56 @@ class OmakaseCrawler:
         self, page: Page, results: dict[str, RestaurantInfo], max_pages: int
     ) -> None:
         page.wait_for_load_state("networkidle", timeout=self.request_timeout_ms)
-        # omakase.in uses infinite scroll, so scroll to the bottom to
-        # force lazy-loaded restaurants into the DOM.
+        # In case the first page lazy-loads above the fold.
         _scroll_to_bottom(page)
-        for _ in range(max_pages):
-            anchors = page.query_selector_all(LIST_SELECTORS["restaurant_link"])
-            for a in anchors:
-                href = a.get_attribute("href")
-                if not href:
-                    continue
-                full_url = urljoin(BASE_URL, href.split("?")[0])
-                rid = _extract_restaurant_id(full_url)
-                if not rid or rid in results:
-                    continue
-                text = (a.inner_text() or "").strip()
-                name, genre, area = _parse_link_text(text)
-                if not name:
-                    continue
-                results[rid] = RestaurantInfo(
-                    omakase_id=rid,
-                    name=name,
-                    url=full_url,
-                    genre=genre,
-                    area=area,
-                )
-            # If a "next page" link is present, follow it (some sub-views).
-            next_btn = page.query_selector(LIST_SELECTORS["next_page"])
-            if not next_btn:
-                return
+
+        self._collect_items(page, results)
+        max_page = _find_max_page(page)
+        log.info("Pagination: max page = %d", max_page)
+
+        for n in range(2, min(max_page, max_pages) + 1):
+            page_url = f"{BASE_URL}/r/page/{n}"
             try:
-                next_btn.click()
-                page.wait_for_load_state("networkidle", timeout=self.request_timeout_ms)
+                page.goto(page_url, wait_until="domcontentloaded")
+                page.wait_for_load_state(
+                    "networkidle", timeout=self.request_timeout_ms
+                )
                 _scroll_to_bottom(page)
-            except Exception:  # noqa: BLE001
-                return
+                before = len(results)
+                self._collect_items(page, results)
+                log.info(
+                    "Page %d: %d new (total %d)",
+                    n,
+                    len(results) - before,
+                    len(results),
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Page %d failed: %s", n, exc)
+                break
+
+    def _collect_items(
+        self, page: Page, results: dict[str, RestaurantInfo]
+    ) -> None:
+        anchors = page.query_selector_all(LIST_SELECTORS["restaurant_link"])
+        for a in anchors:
+            href = a.get_attribute("href")
+            if not href:
+                continue
+            full_url = urljoin(BASE_URL, href.split("?")[0])
+            rid = _extract_restaurant_id(full_url)
+            if not rid or rid in results:
+                continue
+            text = (a.inner_text() or "").strip()
+            name, genre, area = _parse_link_text(text)
+            if not name:
+                continue
+            results[rid] = RestaurantInfo(
+                omakase_id=rid,
+                name=name,
+                url=full_url,
+                genre=genre,
+                area=area,
+            )
 
     # -------- Availability check (per restaurant, per poll) --------
     def check_availability(
@@ -246,6 +262,21 @@ def _parse_link_text(text: str) -> tuple[str, Optional[str], Optional[str]]:
             m.group("area").strip() or None,
         )
     return text.split("\n", 1)[0].strip(), None, None
+
+
+_LIST_PAGE_RE = re.compile(r"/r/page/(\d+)")
+
+
+def _find_max_page(page) -> int:
+    """Return the highest /r/page/<N> number visible on the page,
+    or 1 if no pagination is present."""
+    pages = [1]
+    for a in page.query_selector_all('a[href*="/r/page/"]'):
+        href = a.get_attribute("href") or ""
+        m = _LIST_PAGE_RE.search(href)
+        if m:
+            pages.append(int(m.group(1)))
+    return max(pages)
 
 
 def _scroll_to_bottom(page) -> None:
