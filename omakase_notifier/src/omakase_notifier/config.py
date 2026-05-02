@@ -11,7 +11,13 @@ class AppConfig(BaseModel):
     poll_interval_seconds: float = 300.0
     list_refresh_time: str = "04:00"
     database_url: str = "sqlite:///./data/omakase.db"
-    headless: bool = True
+    # Run Chromium with a visible window. omakase.in performs deep
+    # bot fingerprinting (TLS / Canvas / WebGL subtleties) and serves a
+    # degraded view to headless browsers — paginated URLs all return
+    # page 1's 32 cards. Real-window mode is the only reliable option.
+    # If you need headless on a server with no display, use a virtual
+    # framebuffer (Xvfb) and accept that some pages may be missed.
+    headless: bool = False
     # Default to a realistic Chrome UA. omakase.in serves a stripped-down
     # view (no pagination, no sitemap) to obvious bot User-Agents.
     user_agent: str = (

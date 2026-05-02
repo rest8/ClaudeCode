@@ -14,8 +14,11 @@ app:
   # Where SQLite lives.
   database_url: "sqlite:///./data/omakase.db"
 
-  # Headless browser? Keep true for service mode.
-  headless: true
+  # Run Chromium with a visible window? Must be `false` for omakase.in
+  # — the site fingerprints headless browsers and serves only page 1.
+  # Setting `true` will work for the initial 32 cards but every
+  # /r/page/N URL returns the same content.
+  headless: false
 
   # User-Agent the crawler advertises.
   # Note: omakase.in serves a stripped-down view (no pagination, no
