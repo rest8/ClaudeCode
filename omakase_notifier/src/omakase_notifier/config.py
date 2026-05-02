@@ -50,10 +50,25 @@ class LineConfig(BaseModel):
         return bool(self.channel_access_token)
 
 
+class CaptchaConfig(BaseModel):
+    """Optional 3rd-party CAPTCHA solver config. Activates only when
+    `provider` and `api_key` are both set. Used to clear Cloudflare
+    Turnstile / reCAPTCHA challenges automatically when they appear."""
+
+    provider: str = ""              # "2captcha" (only one supported today)
+    api_key: str = ""
+    timeout_seconds: int = 180
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.provider and self.api_key)
+
+
 class Config(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
     line: LineConfig = Field(default_factory=LineConfig)
+    captcha: CaptchaConfig = Field(default_factory=CaptchaConfig)
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "Config":

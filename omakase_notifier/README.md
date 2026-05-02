@@ -105,36 +105,48 @@ pip install -r requirements-desktop.txt
 > ネイティブウィンドウを使いたい場合は **Python 3.13** で動かしてください。
 > 失敗してもアプリ自体は問題なくブラウザモードで動きます。
 
-### Cloudflare 対策（ほぼ全自動）
+### Cloudflare / ボット検出対策（多層防御）
 
-omakase.in は Cloudflare のボット保護で守られています。本アプリは
-**Chromium の永続プロファイル**（`data/chrome_profile/`）を使い、
-CF クリアランスクッキー（`cf_clearance`）を継続再利用することで
-自動アクセスを維持します。
+本アプリは以下の対策を **すべて** 適用しています。Turnstile（対話 CAPTCHA）
+を含めて完全自動化したい場合は **2captcha** の API キーを設定してください
+（オプション、有料 / 1000 件 ≒ 200 円）。
 
-#### 仕組み
-
-| 動作 | タイミング | 操作 |
+| レイヤ | 対策 | 効く対象 |
 | --- | --- | --- |
-| 永続プロファイル作成 | 初回起動時 | 自動 |
-| CF パッシブチャレンジ通過 | 初回 / クッキー切れ時 | **5〜10秒待つだけ**（Chromium ウィンドウが見える） |
-| クッキー保持 | 全ジョブ間 | 自動（プロファイルに保存） |
-| **Warmup ジョブ** | **12 時間ごと** | **自動**（裏で omakase.in を 30 秒ロード） |
-| ページ間ペーシング | リスト更新時 | 自動（5〜10 秒のランダム間隔） |
-| CF ブロック検出 | リスト更新時 | 自動（途中で停止して IP BAN を回避） |
+| ブラウザ | Chromium 永続プロファイル（cookie / 指紋を保持） | reputation, cookie |
+| ブラウザ | `tf-playwright-stealth`（~50 種の指紋パッチ） | webdriver / canvas / WebGL / WebRTC / etc. |
+| ブラウザ | 自前 `_STEALTH_INIT_SCRIPT`（フォールバック） | 同上 |
+| ブラウザ | `--disable-blink-features=AutomationControlled` | navigator.webdriver |
+| 環境 | viewport / timezone / geolocation のランダム化 | 環境指紋 |
+| HTTP | リクエスト間 5〜10 秒ランダム待機 | レート/バースト分析 |
+| 行動 | マウス移動 / スクロール / 一時停止のシミュレーション | 行動分析 |
+| セッション | 12 時間ごとの自動 Warmup ジョブ | クッキー期限切れ |
+| エラー | Cloudflare ブロック検出時の即時停止 | IP BAN 防止 |
+| **対話 CAPTCHA** | **2captcha 自動解決（opt-in）** | **Turnstile / reCAPTCHA** |
 
-ユーザの操作は基本ゼロです。
+ユーザの操作は **基本ゼロ** です。CF が稀に対話チャレンジを出してきた場合:
 
-#### CF 対話チャレンジが出た場合
+- 2captcha を設定済み → 自動で解決（数十秒）
+- 未設定 → 表示されている Chromium ウィンドウでチェックを入れる（数秒）
 
-CF が稀に「I'm not a robot」のチェックボックスや画像認識を求めてくる
-ことがあります。この場合のみ、目に見えている Chromium ウィンドウで
-チェックを入れてください（5 秒で終わります）。あとは自動継続。
+### 2captcha 連携（任意）
 
-#### 完全に行き詰まったとき
+Turnstile を完全自動化したい場合のみ:
 
-数日に渡って Warmup が連続失敗するなど、プロファイルが「焼け」たと
-判断したら、手動で再ブートストラップ:
+1. https://2captcha.com/ で登録 → API キー取得
+2. クレジット 1〜2 ドル分入金（数千件相当）
+3. `config.yaml` に追記:
+
+```yaml
+captcha:
+  provider: "2captcha"
+  api_key: "あなたの API キー"
+```
+
+設定後は CF が Turnstile を出すたびに 30〜60 秒で自動通過します。
+
+完全に行き詰まったとき（数日 Warmup が連続失敗、対話 CAPTCHA を毎回
+要求される、など）は、手動で再ブートストラップ:
 
 ```powershell
 cd ClaudeCode\omakase_notifier

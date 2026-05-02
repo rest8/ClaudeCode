@@ -40,3 +40,12 @@ line:
   # LINE Messaging API channel access token (long-lived).
   # Required only if any user has line_user_id set.
   channel_access_token: ""
+
+captcha:
+  # Optional. If set, Cloudflare Turnstile / reCAPTCHA challenges are
+  # solved automatically via a 3rd-party CAPTCHA solving service.
+  # Cost is roughly 200円 / 1000 captchas with 2captcha.com.
+  # Without this, Turnstile challenges require manual interaction in
+  # the visible Chromium window.
+  provider: ""              # "2captcha" or empty to disable
+  api_key: ""               # https://2captcha.com/setting

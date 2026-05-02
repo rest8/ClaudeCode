@@ -32,6 +32,15 @@ from playwright.sync_api import (
 
 from ..models import AvailabilitySlot
 from .base import RestaurantInfo
+from .captcha import solve_turnstile
+
+try:
+    # Optional dep: tf-playwright-stealth provides ~50 fingerprint patches
+    # (TLS-near, canvas, audio, screen, etc.) far beyond our hand-rolled
+    # init script. Without it, the fallback _STEALTH_INIT_SCRIPT is used.
+    from playwright_stealth import Stealth as _Stealth  # type: ignore
+except Exception:  # noqa: BLE001
+    _Stealth = None
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +91,101 @@ _DEFAULT_BROWSER_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
+
+# Realistic desktop viewports — picked at random per session to avoid
+# the exact-same-pixel-size fingerprint.
+_VIEWPORTS = [
+    {"width": 1280, "height": 800},
+    {"width": 1366, "height": 768},
+    {"width": 1440, "height": 900},
+    {"width": 1536, "height": 864},
+    {"width": 1600, "height": 900},
+    {"width": 1920, "height": 1080},
+]
+
+
+def _humanize(page) -> None:
+    """Mouse moves + scrolls + small pauses so we don't look like a
+    headless bot to behavioral analytics."""
+    try:
+        viewport = page.viewport_size or {"width": 1280, "height": 800}
+        for _ in range(random.randint(2, 4)):
+            x = random.randint(80, viewport["width"] - 80)
+            y = random.randint(80, viewport["height"] - 80)
+            page.mouse.move(x, y, steps=random.randint(8, 22))
+            time.sleep(random.uniform(0.15, 0.45))
+        for _ in range(random.randint(2, 4)):
+            page.mouse.wheel(0, random.randint(180, 700))
+            time.sleep(random.uniform(0.3, 0.9))
+        # occasional small scroll-back, like a person re-checking
+        if random.random() < 0.4:
+            page.mouse.wheel(0, -random.randint(80, 250))
+            time.sleep(random.uniform(0.2, 0.5))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _has_turnstile(page) -> bool:
+    """True iff a Cloudflare Turnstile challenge widget is on the page."""
+    try:
+        return page.locator(
+            'iframe[src*="challenges.cloudflare.com"], div.cf-turnstile'
+        ).count() > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _maybe_solve_turnstile(
+    page, provider: str, api_key: str, timeout: int
+) -> bool:
+    """Detect a Turnstile widget and solve it via the configured 3rd-party
+    provider. Returns True if solved, False otherwise."""
+    if not (provider and api_key) or not _has_turnstile(page):
+        return False
+    try:
+        sitekey = page.evaluate(
+            """() => {
+                const f = document.querySelector('iframe[src*="challenges.cloudflare.com"]');
+                if (f) {
+                    const m = f.src.match(/turnstile\\/.*?\\?.*?[?&]k=([^&]+)/);
+                    if (m) return decodeURIComponent(m[1]);
+                }
+                const d = document.querySelector('[data-sitekey]');
+                return d ? d.getAttribute('data-sitekey') : null;
+            }"""
+        )
+        if not sitekey:
+            log.warning("Turnstile present but sitekey not found; skipping solver")
+            return False
+        log.info("Turnstile detected; submitting to %s solver...", provider)
+        token = solve_turnstile(provider, api_key, sitekey, page.url, timeout)
+        page.evaluate(
+            """(t) => {
+                const inp = document.querySelector('input[name="cf-turnstile-response"]');
+                if (inp) { inp.value = t; }
+                if (window.turnstile && typeof window.turnstile.setResponse === 'function') {
+                    window.turnstile.setResponse(t);
+                }
+            }""",
+            token,
+        )
+        # Trigger any onSuccess callback by submitting the surrounding form
+        # if there is one; otherwise just wait for navigation.
+        try:
+            page.evaluate(
+                """() => {
+                    const f = document.querySelector('form');
+                    if (f) f.submit();
+                }"""
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        page.wait_for_load_state("networkidle", timeout=30_000)
+        log.info("Turnstile token injected.")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Turnstile solve failed: %s", exc)
+        return False
 
 # Injected before any page script runs. Hides the standard
 # "this is a bot" tells that omakase.in checks for.
@@ -138,10 +242,16 @@ class OmakaseCrawler:
         headless: bool = True,
         user_agent: str = "OmakaseNotifier/0.1",
         request_timeout_ms: int = 30_000,
+        captcha_provider: str = "",
+        captcha_api_key: str = "",
+        captcha_timeout: int = 180,
     ):
         self.headless = headless
         self.user_agent = user_agent
         self.request_timeout_ms = request_timeout_ms
+        self.captcha_provider = captcha_provider
+        self.captcha_api_key = captcha_api_key
+        self.captcha_timeout = captcha_timeout
 
     @contextmanager
     def _browser(self) -> Iterator[tuple[Playwright, Optional[Browser], BrowserContext]]:
@@ -161,18 +271,38 @@ class OmakaseCrawler:
                 or "OmakaseNotifier" in ua
             ):
                 ua = _DEFAULT_BROWSER_UA
+            # Random viewport in a realistic range — frozen-viewport is
+            # a fingerprinting tell.
+            viewport = random.choice(_VIEWPORTS)
             context = pw.chromium.launch_persistent_context(
                 user_data_dir=str(profile),
                 headless=self.headless,
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--disable-features=IsolateOrigins,site-per-process",
+                    "--lang=ja-JP",
                 ],
                 user_agent=ua,
                 locale="ja-JP",
-                viewport={"width": 1280, "height": 900},
+                timezone_id="Asia/Tokyo",
+                geolocation={"longitude": 139.6917, "latitude": 35.6895},
+                permissions=["geolocation"],
+                viewport=viewport,
+                screen=viewport,
+                color_scheme="light",
             )
-            context.add_init_script(_STEALTH_INIT_SCRIPT)
+            # Apply tf-playwright-stealth's comprehensive patches if the
+            # package is installed; otherwise fall back to our hand-rolled
+            # init script. Stealth() covers ~50 fingerprint vectors that
+            # the manual script does not.
+            if _Stealth is not None:
+                try:
+                    _Stealth().apply_stealth_sync(context)
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("tf-playwright-stealth failed (%s); using fallback init", exc)
+                    context.add_init_script(_STEALTH_INIT_SCRIPT)
+            else:
+                context.add_init_script(_STEALTH_INIT_SCRIPT)
             context.set_default_timeout(self.request_timeout_ms)
             try:
                 # launch_persistent_context returns the context directly;
@@ -239,6 +369,16 @@ class OmakaseCrawler:
                     page.wait_for_load_state(
                         "networkidle", timeout=self.request_timeout_ms
                     )
+                    if _maybe_solve_turnstile(
+                        page,
+                        self.captcha_provider,
+                        self.captcha_api_key,
+                        self.captcha_timeout,
+                    ):
+                        page.wait_for_load_state(
+                            "networkidle", timeout=self.request_timeout_ms
+                        )
+                    _humanize(page)
                     _scroll_to_bottom(page)
                     before = len(results)
                     self._collect_items(page, results)
@@ -269,6 +409,17 @@ class OmakaseCrawler:
                     np.wait_for_load_state(
                         "networkidle", timeout=self.request_timeout_ms
                     )
+                    # Try to clear Turnstile if it appeared and a solver
+                    # is configured.
+                    if _maybe_solve_turnstile(
+                        np,
+                        self.captcha_provider,
+                        self.captcha_api_key,
+                        self.captcha_timeout,
+                    ):
+                        np.wait_for_load_state(
+                            "networkidle", timeout=self.request_timeout_ms
+                        )
                     if _is_cloudflare_block(np):
                         log.error(
                             "Page %d: Cloudflare block detected (title=%r). "
@@ -280,6 +431,7 @@ class OmakaseCrawler:
                         )
                         cf_blocked = True
                         break
+                    _humanize(np)
                     _scroll_to_bottom(np)
                     before = len(results)
                     self._collect_items(np, results)

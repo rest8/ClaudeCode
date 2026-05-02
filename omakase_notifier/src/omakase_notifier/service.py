@@ -39,6 +39,9 @@ class Service:
         self.crawler = OmakaseCrawler(
             headless=config.app.headless,
             user_agent=config.app.user_agent,
+            captcha_provider=config.captcha.provider,
+            captcha_api_key=config.captcha.api_key,
+            captcha_timeout=config.captcha.timeout_seconds,
         )
         self.dispatcher = NotificationDispatcher(config)
         self.scheduler = BackgroundScheduler(timezone="Asia/Tokyo")
