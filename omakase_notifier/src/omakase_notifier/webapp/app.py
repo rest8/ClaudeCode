@@ -6,14 +6,12 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
-from starlette.requests import Request
 
-from ..config import Config, default_config_path
+from ..config import default_config_path
 from ..db import session_scope
 from ..models import (
     AvailabilitySnapshot,
@@ -25,7 +23,7 @@ from ..models import (
 from ..service import Service
 
 WEBAPP_DIR = Path(__file__).resolve().parent
-TEMPLATES = Jinja2Templates(directory=str(WEBAPP_DIR / "templates"))
+INDEX_HTML = WEBAPP_DIR / "templates" / "index.html"
 
 
 class UserIn(BaseModel):
@@ -72,8 +70,8 @@ def create_app(service: Service) -> FastAPI:
     )
 
     @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request):
-        return TEMPLATES.TemplateResponse("index.html", {"request": request})
+    async def index():
+        return FileResponse(INDEX_HTML, media_type="text/html")
 
     # ---------- service status / control ----------
     @app.get("/api/status")
