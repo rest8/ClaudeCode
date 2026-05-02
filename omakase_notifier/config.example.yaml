@@ -17,9 +17,12 @@ app:
   # Headless browser? Keep true for service mode.
   headless: true
 
-  # User-Agent the crawler advertises. Set this to something honest that
-  # identifies your service so the site operator can contact you.
-  user_agent: "OmakaseNotifier/0.1 (+contact@example.com)"
+  # User-Agent the crawler advertises.
+  # Note: omakase.in serves a stripped-down view (no pagination, no
+  # sitemap) to obvious bot UAs. Use a realistic Chrome string here.
+  # If you set anything that does NOT contain "Mozilla", the crawler
+  # silently falls back to Playwright's default Chromium UA.
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 email:
   # SMTP settings used to send notifications.

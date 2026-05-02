@@ -12,7 +12,13 @@ class AppConfig(BaseModel):
     list_refresh_time: str = "04:00"
     database_url: str = "sqlite:///./data/omakase.db"
     headless: bool = True
-    user_agent: str = "OmakaseNotifier/0.1"
+    # Default to a realistic Chrome UA. omakase.in serves a stripped-down
+    # view (no pagination, no sitemap) to obvious bot User-Agents.
+    user_agent: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
+    )
     web_host: str = "127.0.0.1"
     web_port: int = 8765
 

@@ -81,12 +81,21 @@ class OmakaseCrawler:
     @contextmanager
     def _browser(self) -> Iterator[tuple[Playwright, Browser, BrowserContext]]:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=self.headless)
-            context = browser.new_context(
-                user_agent=self.user_agent,
-                locale="ja-JP",
-                viewport={"width": 1280, "height": 900},
+            browser = pw.chromium.launch(
+                headless=self.headless,
+                args=["--disable-blink-features=AutomationControlled"],
             )
+            ctx_kwargs: dict = {
+                "locale": "ja-JP",
+                "viewport": {"width": 1280, "height": 900},
+            }
+            # Only override the UA when it looks like a real browser.
+            # Bot-style strings ("OmakaseNotifier/0.1") cause omakase.in
+            # to serve a stripped view in which paginated URLs all
+            # return page 1, masking restaurants on /r/page/2..N.
+            if self.user_agent and "Mozilla" in self.user_agent:
+                ctx_kwargs["user_agent"] = self.user_agent
+            context = browser.new_context(**ctx_kwargs)
             context.set_default_timeout(self.request_timeout_ms)
             try:
                 yield pw, browser, context
