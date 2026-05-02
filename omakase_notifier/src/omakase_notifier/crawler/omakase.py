@@ -288,6 +288,22 @@ class OmakaseCrawler:
         appeared — content diff is logged by the caller)."""
         timeout = self.request_timeout_ms
 
+        # Snapshot the first restaurant link so we can detect whether
+        # the page's content actually changes after navigation.
+        try:
+            before_href = page.evaluate(
+                """() => {
+                    const cards = document.querySelectorAll(
+                        'a[href*="/r/"]:not([href*="/page/"])'
+                    );
+                    return cards.length ? cards[0].href : '';
+                }"""
+            )
+        except Exception:  # noqa: BLE001
+            before_href = ""
+
+        navigated = False
+
         # Strategy 1: click an existing pagination link on the current
         # page. Works even when omakase's SPA routes /r/page/<n>
         # client-side and ignores direct URL navigation.
@@ -302,24 +318,55 @@ class OmakaseCrawler:
                     continue
                 loc.scroll_into_view_if_needed(timeout=4000)
                 loc.click(timeout=4000)
-                page.wait_for_load_state("networkidle", timeout=timeout)
-                return True
+                navigated = True
+                break
             except Exception as exc:  # noqa: BLE001
                 log.debug("click %s failed: %s", sel, exc)
 
-        # Strategy 2: direct URL navigation (/r/page/<n>).
-        for url in (
-            f"{BASE_URL}/r/page/{n}",
-            f"{BASE_URL}/r?page={n}",
-        ):
-            try:
-                page.goto(url, wait_until="domcontentloaded")
-                page.wait_for_load_state("networkidle", timeout=timeout)
-                return True
-            except Exception as exc:  # noqa: BLE001
-                log.debug("goto %s failed: %s", url, exc)
+        # Strategy 2: direct URL navigation as fallback.
+        if not navigated:
+            for url in (
+                f"{BASE_URL}/r/page/{n}",
+                f"{BASE_URL}/r?page={n}",
+            ):
+                try:
+                    page.goto(url, wait_until="domcontentloaded")
+                    navigated = True
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("goto %s failed: %s", url, exc)
 
-        return False
+        if not navigated:
+            return False
+
+        # Wait until the first card on the page actually points at a
+        # different restaurant — SPA hydration can lag well past the
+        # networkidle event.
+        try:
+            page.wait_for_function(
+                """(prev) => {
+                    const cards = document.querySelectorAll(
+                        'a[href*="/r/"]:not([href*="/page/"])'
+                    );
+                    if (cards.length === 0) return false;
+                    return cards[0].href !== prev;
+                }""",
+                arg=before_href,
+                timeout=12_000,
+            )
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "Page %d: first card href did not change after %dms; "
+                "site may serve the same content for paginated URLs.",
+                n,
+                12_000,
+            )
+
+        try:
+            page.wait_for_load_state("networkidle", timeout=timeout)
+        except Exception:  # noqa: BLE001
+            pass
+        return True
 
     def _collect_items(
         self, page: Page, results: dict[str, RestaurantInfo]
