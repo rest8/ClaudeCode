@@ -89,7 +89,7 @@ class OmakaseScraper:
         return self._filter(slots, target)
 
     def _parse(self, html: str) -> set[AvailabilitySlot]:
-        soup = BeautifulSoup(html, "lxml")
+        soup = BeautifulSoup(html, "html.parser")
         slots: set[AvailabilitySlot] = set()
 
         slots |= self._parse_jsonld(soup)

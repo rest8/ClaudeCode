@@ -13,7 +13,7 @@
 
 ## セットアップ (Windows)
 
-1. [Python 3.10+](https://www.python.org/downloads/) をインストール（PATH に追加）
+1. [Python 3.10〜3.14](https://www.python.org/downloads/) をインストール（PATH に追加）。Python 3.14.4 で動作確認済み
 2. このリポジトリを取得し、`config.example.yaml` を `config.yaml` にコピーして編集
 3. `run.bat` をダブルクリック（初回は仮想環境を作成し依存パッケージを導入）
 
