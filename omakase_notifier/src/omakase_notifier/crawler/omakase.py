@@ -53,10 +53,11 @@ LIST_SELECTORS = {
     "next_page": 'a[rel="next"], a.pagination-next',
 }
 
-def _storage_path() -> Path:
-    """Where setup_session.py saves the Cloudflare-cleared cookies."""
+def _profile_dir() -> Path:
+    """Persistent Chromium profile path. Stores cookies (cf_clearance),
+    local storage, and other browser state across runs."""
     # crawler/omakase.py -> ../../.. = project root (omakase_notifier/)
-    return Path(__file__).resolve().parents[3] / "data" / "storage_state.json"
+    return Path(__file__).resolve().parents[3] / "data" / "chrome_profile"
 
 
 def _is_cloudflare_block(page) -> bool:
@@ -143,20 +144,16 @@ class OmakaseCrawler:
         self.request_timeout_ms = request_timeout_ms
 
     @contextmanager
-    def _browser(self) -> Iterator[tuple[Playwright, Browser, BrowserContext]]:
+    def _browser(self) -> Iterator[tuple[Playwright, Optional[Browser], BrowserContext]]:
+        """Open a Chromium with a *persistent* user data dir under
+        data/chrome_profile/. Cookies (notably cf_clearance), local
+        storage, and browser fingerprints all survive across runs, so
+        Cloudflare treats us as a returning visitor instead of a
+        burst-y bot every time.
+        """
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=self.headless,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-features=IsolateOrigins,site-per-process",
-                ],
-            )
-            # omakase.in inspects navigator.webdriver, the "HeadlessChrome"
-            # token in the UA, plugins, and window.chrome. If it sees a
-            # bot it serves a stripped-down view in which every paginated
-            # URL returns the same 32 cards. Force a realistic UA and a
-            # stealth init script that hides those tells.
+            profile = _profile_dir()
+            profile.mkdir(parents=True, exist_ok=True)
             ua = self.user_agent or ""
             if (
                 "Mozilla" not in ua
@@ -164,35 +161,55 @@ class OmakaseCrawler:
                 or "OmakaseNotifier" in ua
             ):
                 ua = _DEFAULT_BROWSER_UA
-            ctx_kwargs: dict = {
-                "user_agent": ua,
-                "locale": "ja-JP",
-                "viewport": {"width": 1280, "height": 900},
-            }
-            storage = _storage_path()
-            if storage.exists():
-                ctx_kwargs["storage_state"] = str(storage)
-                log.info("Reusing saved Cloudflare session: %s", storage)
-            else:
-                log.warning(
-                    "No saved session at %s. Run `python setup_session.py` "
-                    "to bootstrap one — without it Cloudflare will block "
-                    "paginated requests.",
-                    storage,
-                )
-            context = browser.new_context(**ctx_kwargs)
+            context = pw.chromium.launch_persistent_context(
+                user_data_dir=str(profile),
+                headless=self.headless,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=IsolateOrigins,site-per-process",
+                ],
+                user_agent=ua,
+                locale="ja-JP",
+                viewport={"width": 1280, "height": 900},
+            )
             context.add_init_script(_STEALTH_INIT_SCRIPT)
             context.set_default_timeout(self.request_timeout_ms)
             try:
-                yield pw, browser, context
+                # launch_persistent_context returns the context directly;
+                # there's no separate Browser handle. Yield None for it
+                # so the (_pw, _b, ctx) unpacking elsewhere keeps working.
+                yield pw, None, context
             finally:
-                # Persist any cookie refresh CF issued during this run.
-                try:
-                    context.storage_state(path=str(storage))
-                except Exception:  # noqa: BLE001
-                    pass
                 context.close()
-                browser.close()
+
+    # -------- Cookie warm-up --------
+    def warmup(self) -> None:
+        """Visit omakase.in briefly to keep cf_clearance fresh. Run on
+        a slow schedule (every several hours) so Cloudflare sees regular
+        human-like activity from the persistent profile."""
+        log.info("Warming up Cloudflare session...")
+        try:
+            with self._browser() as (_pw, _b, ctx):
+                page = ctx.new_page()
+                try:
+                    page.goto(f"{BASE_URL}/r", wait_until="domcontentloaded")
+                    page.wait_for_load_state(
+                        "networkidle", timeout=self.request_timeout_ms
+                    )
+                    if _is_cloudflare_block(page):
+                        log.warning(
+                            "Warmup hit Cloudflare block. The persistent "
+                            "profile may need to be re-bootstrapped via "
+                            "setup_session.py."
+                        )
+                    else:
+                        # Linger a bit so it looks like real reading time.
+                        time.sleep(random.uniform(20, 35))
+                        log.info("Warmup OK.")
+                finally:
+                    page.close()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Warmup failed: %s", exc)
 
     # -------- Restaurant list (daily) --------
     def fetch_restaurant_list(

@@ -53,6 +53,7 @@ class Service:
         self.scheduler.start()
         self._reschedule_poll(self.config.app.poll_interval_seconds)
         self._reschedule_list(self.config.app.list_refresh_time)
+        self._schedule_warmup()
         self._log(
             "Service started. (headless=%s, poll_interval=%gs, list_refresh=%s)"
             % (
@@ -60,6 +61,20 @@ class Service:
                 self.config.app.poll_interval_seconds,
                 self.config.app.list_refresh_time,
             )
+        )
+
+    def _schedule_warmup(self) -> None:
+        """Touch omakase.in every ~12 hours so the persistent Chromium
+        profile keeps a valid cf_clearance cookie. Without this the
+        cookie expires (~30 days) and the next bulk crawl gets blocked."""
+        self.scheduler.add_job(
+            self.crawler.warmup,
+            trigger=IntervalTrigger(hours=12),
+            id="cf_warmup",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            next_run_time=datetime.now(),
         )
 
     def stop(self) -> None:

@@ -1,22 +1,16 @@
-"""One-time Cloudflare clearance helper.
+"""Bootstrap (or recover) the persistent Chromium profile that the
+crawler uses to bypass Cloudflare.
 
-omakase.in is fronted by Cloudflare's bot protection. A normal browsing
-session passes the challenge once, gets a cf_clearance cookie that's
-valid for ~30 days, and is then trusted.
+Most users will NEVER need to run this — the main app uses the same
+persistent profile and self-bootstraps. Run this only if:
 
-Run this script whenever you get blocked (typically once per ~30 days):
+- It's your very first launch and you want to pre-warm the profile
+  without going through the web UI's "リスト更新" flow.
+- The auto-warmup job has been failing for several days (Cloudflare
+  blocks persisting), and you want to manually pass a fresh challenge.
 
+Usage:
     python setup_session.py
-
-Steps the script will guide you through:
-  1. A real Chromium window opens at https://omakase.in/r.
-  2. If you see the red Cloudflare "X" or a "Just a moment..." page,
-     wait ~10 seconds and refresh, or wait a few minutes — the IP may
-     be in a temporary cooldown. Repeat until the actual restaurant
-     list is visible.
-  3. Switch to this PowerShell window and press Enter.
-  4. The session is saved to data/storage_state.json. All future
-     crawls will reuse it and stay below Cloudflare's bot threshold.
 """
 
 from __future__ import annotations
@@ -30,7 +24,7 @@ sys.path.insert(0, os.path.join(HERE, "src"))
 
 from playwright.sync_api import sync_playwright  # noqa: E402
 
-STORAGE_PATH = Path(HERE) / "data" / "storage_state.json"
+PROFILE_DIR = Path(HERE) / "data" / "chrome_profile"
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -40,14 +34,13 @@ UA = (
 
 
 def main() -> None:
-    STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    print("Opening Chromium pointed at https://omakase.in/r ...")
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Using persistent Chromium profile at: {PROFILE_DIR}")
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(
+        context = pw.chromium.launch_persistent_context(
+            user_data_dir=str(PROFILE_DIR),
             headless=False,
             args=["--disable-blink-features=AutomationControlled"],
-        )
-        context = browser.new_context(
             user_agent=UA,
             locale="ja-JP",
             viewport={"width": 1280, "height": 900},
@@ -57,30 +50,29 @@ def main() -> None:
 
         print()
         print("=" * 64)
-        print(" In the Chromium window:")
-        print(" 1. Wait until the restaurant LIST (cards) is visible.")
-        print(" 2. If a red 'Attention Required' / 'Just a moment...'")
-        print("    page appears, wait or refresh until it clears.")
-        print(" 3. Optional but recommended: also visit /r/page/2 or")
-        print("    /r/page/3 manually so the cookie is exercised once")
-        print("    on a paginated URL too.")
-        print(" 4. Then switch back here and press Enter.")
+        print(" 1. Wait until the restaurant LIST is visible.")
+        print(" 2. If a 'Just a moment...' / red 'X' page appears, wait")
+        print("    or refresh until the listing actually loads.")
+        print(" 3. Optional but recommended: also visit /r/page/2 once")
+        print("    so the cookie is exercised on a paginated URL.")
+        print(" 4. Switch back here and press Enter.")
         print("=" * 64)
         try:
             input(" >>> Press Enter when the listing is visible <<< ")
         except (EOFError, KeyboardInterrupt):
             print("Aborted.")
-            browser.close()
+            context.close()
             return
 
-        context.storage_state(path=str(STORAGE_PATH))
+        # The persistent context flushes cookies on close.
+        context.close()
         print()
-        print(f"Session saved to: {STORAGE_PATH}")
+        print(f"Profile saved at {PROFILE_DIR}.")
         print(
-            "All future crawls will reuse it. Re-run this script "
-            "whenever you get blocked again (typically every 25-30 days)."
+            "The main app will reuse this profile automatically. "
+            "An auto-warmup task running every 12h will keep the "
+            "Cloudflare cookie alive thereafter."
         )
-        browser.close()
 
 
 if __name__ == "__main__":
