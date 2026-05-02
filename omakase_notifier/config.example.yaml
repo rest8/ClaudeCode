@@ -1,0 +1,36 @@
+# Omakase Notifier configuration
+# Copy this file to config.yaml and edit values for your environment.
+
+app:
+  # Polling interval for the availability checker, in seconds.
+  # The admin UI can override this at runtime down to 0.1s precision.
+  # Note: very short intervals will hammer the target site and very likely
+  # violate its Terms of Service. 300s (5 min) is the recommended default.
+  poll_interval_seconds: 300
+
+  # Daily refresh time for the restaurant master list (HH:MM, 24h, local time).
+  list_refresh_time: "04:00"
+
+  # Where SQLite lives.
+  database_url: "sqlite:///./data/omakase.db"
+
+  # Headless browser? Keep true for service mode.
+  headless: true
+
+  # User-Agent the crawler advertises. Set this to something honest that
+  # identifies your service so the site operator can contact you.
+  user_agent: "OmakaseNotifier/0.1 (+contact@example.com)"
+
+email:
+  # SMTP settings used to send notifications.
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  smtp_user: "your-account@gmail.com"
+  smtp_password: "app-password-here"
+  from_address: "Omakase Notifier <your-account@gmail.com>"
+  use_starttls: true
+
+line:
+  # LINE Messaging API channel access token (long-lived).
+  # Required only if any user has line_user_id set.
+  channel_access_token: ""
