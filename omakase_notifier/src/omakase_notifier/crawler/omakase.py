@@ -101,12 +101,16 @@ class OmakaseCrawler:
         """Fetch the master list of restaurants currently published on
         omakase.in.
 
-        We try a few candidate listing URLs, since the public route may
-        change. The result is deduplicated by omakase_id.
+        Strategy: walk /r pagination first (gets nice card text with
+        name/genre/area for ~660 popular cards), then probe sitemap.xml
+        and visit any /r/<id> pages we haven't seen yet (catches the
+        long tail). Results are deduplicated by omakase_id.
         """
         results: dict[str, RestaurantInfo] = {}
         with self._browser() as (_pw, _b, ctx):
             page = ctx.new_page()
+
+            # 1) Pagination — picks up most listings with full metadata.
             for url in LIST_URL_CANDIDATES:
                 try:
                     log.info("Fetching restaurant list from %s", url)
@@ -116,7 +120,128 @@ class OmakaseCrawler:
                         break
                 except Exception as exc:  # noqa: BLE001
                     log.warning("List URL failed %s: %s", url, exc)
+            log.info("After pagination: %d restaurants", len(results))
+
+            # 2) Sitemap fallback — discover IDs the listing didn't show.
+            try:
+                sitemap_ids = self._discover_via_sitemap(page)
+                missing = sorted(sitemap_ids - set(results.keys()))
+                if missing:
+                    log.info(
+                        "Sitemap discovered %d additional restaurant id(s); "
+                        "fetching their pages...",
+                        len(missing),
+                    )
+                    for i, rid in enumerate(missing, 1):
+                        info = self._fetch_one_restaurant(page, rid)
+                        if info is not None:
+                            results[rid] = info
+                        else:
+                            results[rid] = RestaurantInfo(
+                                omakase_id=rid,
+                                name=rid,
+                                url=f"{BASE_URL}/r/{rid}",
+                            )
+                        if i % 25 == 0:
+                            log.info(
+                                "Detail fetch progress: %d / %d",
+                                i,
+                                len(missing),
+                            )
+                else:
+                    log.info("Sitemap added no new restaurants.")
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Sitemap discovery failed: %s", exc)
+
         return list(results.values())
+
+    def _discover_via_sitemap(self, page: Page) -> set[str]:
+        """Walk sitemap.xml (and any nested <sitemap> entries) to find
+        every /r/<id> URL that omakase.in publishes."""
+        seen_sitemaps: set[str] = set()
+        ids: set[str] = set()
+        queue = [
+            f"{BASE_URL}/sitemap.xml",
+            f"{BASE_URL}/sitemap_index.xml",
+            f"{BASE_URL}/sitemaps/restaurants.xml",
+        ]
+        while queue:
+            sm_url = queue.pop(0)
+            if sm_url in seen_sitemaps:
+                continue
+            seen_sitemaps.add(sm_url)
+            text = self._fetch_text(page, sm_url)
+            if not text:
+                continue
+            for m in re.finditer(r"<loc>\s*([^<\s]+)\s*</loc>", text):
+                loc = m.group(1)
+                if loc.endswith(".xml"):
+                    queue.append(loc)
+                    continue
+                rid = _extract_restaurant_id(loc)
+                if rid:
+                    ids.add(rid)
+        return ids
+
+    def _fetch_text(self, page: Page, url: str) -> Optional[str]:
+        """Use the page's authenticated fetch() to retrieve a URL as
+        text. Returns None on any error (404, network, blocked, etc.)."""
+        try:
+            return page.evaluate(
+                """async (u) => {
+                    try {
+                        const r = await fetch(u, { credentials: 'include' });
+                        if (!r.ok) return null;
+                        return await r.text();
+                    } catch (e) { return null; }
+                }""",
+                url,
+            )
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _fetch_one_restaurant(
+        self, page: Page, rid: str
+    ) -> Optional[RestaurantInfo]:
+        """Visit a single restaurant page to extract name/genre/area
+        metadata. Used for IDs we discovered via sitemap but not in /r."""
+        url = f"{BASE_URL}/r/{rid}"
+        try:
+            page.goto(url, wait_until="domcontentloaded")
+            page.wait_for_load_state(
+                "networkidle", timeout=self.request_timeout_ms
+            )
+            data = page.evaluate(
+                """() => {
+                    const og = document.querySelector('meta[property="og:title"]');
+                    const t  = (og && og.content)
+                            || (document.querySelector('h1') && document.querySelector('h1').innerText)
+                            || document.title || '';
+                    // Genre / area sometimes appear in breadcrumbs or list items.
+                    const breadcrumbs = Array.from(
+                        document.querySelectorAll('nav.breadcrumb a, .breadcrumb a, ol.breadcrumb a')
+                    ).map(a => a.innerText.trim()).filter(Boolean);
+                    return { title: t.trim(), breadcrumbs };
+                }"""
+            )
+            title = (data.get("title") if isinstance(data, dict) else "") or rid
+            crumbs = data.get("breadcrumbs", []) if isinstance(data, dict) else []
+            area = next(
+                (c for c in crumbs if c.endswith("都") or c.endswith("府") or c.endswith("県") or c.endswith("道")),
+                None,
+            )
+            genre = None
+            if crumbs:
+                # last non-area crumb is often the genre
+                rest = [c for c in crumbs if c != area]
+                if rest:
+                    genre = rest[-1]
+            return RestaurantInfo(
+                omakase_id=rid, name=title, url=url, area=area, genre=genre
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug("fetch_one_restaurant(%s) failed: %s", rid, exc)
+            return None
 
     def _scrape_list_page(
         self, page: Page, results: dict[str, RestaurantInfo], max_pages: int

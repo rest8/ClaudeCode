@@ -154,23 +154,87 @@ $("#calNext").addEventListener("click", () => {
 });
 
 /* ---------------- Restaurants ---------------- */
-let restaurantsCache = [];
+const REGION_MAP = {
+  "北海道": "北海道",
+  "青森県": "東北", "岩手県": "東北", "宮城県": "東北",
+  "秋田県": "東北", "山形県": "東北", "福島県": "東北",
+  "茨城県": "関東", "栃木県": "関東", "群馬県": "関東",
+  "埼玉県": "関東", "千葉県": "関東", "東京都": "関東", "神奈川県": "関東",
+  "新潟県": "中部", "富山県": "中部", "石川県": "中部", "福井県": "中部",
+  "山梨県": "中部", "長野県": "中部", "岐阜県": "中部", "静岡県": "中部", "愛知県": "中部",
+  "三重県": "近畿", "滋賀県": "近畿", "京都府": "近畿",
+  "大阪府": "近畿", "兵庫県": "近畿", "奈良県": "近畿", "和歌山県": "近畿",
+  "鳥取県": "中国", "島根県": "中国", "岡山県": "中国", "広島県": "中国", "山口県": "中国",
+  "徳島県": "四国", "香川県": "四国", "愛媛県": "四国", "高知県": "四国",
+  "福岡県": "九州・沖縄", "佐賀県": "九州・沖縄", "長崎県": "九州・沖縄", "熊本県": "九州・沖縄",
+  "大分県": "九州・沖縄", "宮崎県": "九州・沖縄", "鹿児島県": "九州・沖縄", "沖縄県": "九州・沖縄"
+};
+const REGION_ORDER = ["北海道", "東北", "関東", "中部", "近畿", "中国", "四国", "九州・沖縄"];
 
-async function loadRestaurants(q = "") {
+let restaurantsCache = [];
+const restFilters = { search: "", region: "", prefecture: "", genre: "" };
+
+async function loadRestaurants() {
   const list = $("#restList");
   list.innerHTML = `<div class="list-empty">読み込み中…</div>`;
-  restaurantsCache = await api.get(`/api/restaurants${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+  restaurantsCache = await api.get("/api/restaurants");
+  rebuildFilterOptions();
   renderRestaurants();
+}
+
+function rebuildFilterOptions() {
+  const regions = REGION_ORDER.filter((reg) =>
+    restaurantsCache.some((r) => REGION_MAP[r.area] === reg)
+  );
+  fillSelect("#filterRegion", "地域: すべて", regions, restFilters.region);
+
+  const prefectures = [...new Set(
+    restaurantsCache
+      .filter((r) => !restFilters.region || REGION_MAP[r.area] === restFilters.region)
+      .map((r) => r.area)
+      .filter(Boolean)
+  )].sort();
+  fillSelect("#filterPrefecture", "都道府県: すべて", prefectures, restFilters.prefecture);
+
+  const genres = [...new Set(
+    restaurantsCache.map((r) => r.genre).filter(Boolean)
+  )].sort();
+  fillSelect("#filterGenre", "ジャンル: すべて", genres, restFilters.genre);
+}
+
+function fillSelect(sel, allLabel, options, current) {
+  const el = $(sel);
+  el.innerHTML = `<option value="">${allLabel}</option>` +
+    options.map((o) => `<option value="${escapeAttr(o)}"${o === current ? " selected" : ""}>${escapeHtml(o)}</option>`).join("");
+}
+
+function applyFilters() {
+  const q = restFilters.search.toLowerCase();
+  return restaurantsCache.filter((r) => {
+    if (q && !((r.name || "").toLowerCase().includes(q) ||
+               (r.genre || "").toLowerCase().includes(q) ||
+               (r.area || "").toLowerCase().includes(q))) return false;
+    if (restFilters.region && REGION_MAP[r.area] !== restFilters.region) return false;
+    if (restFilters.prefecture && r.area !== restFilters.prefecture) return false;
+    if (restFilters.genre && r.genre !== restFilters.genre) return false;
+    return true;
+  });
 }
 
 function renderRestaurants() {
   const list = $("#restList");
   list.innerHTML = "";
+  const filtered = applyFilters();
+  $("#filterCount").textContent = `${filtered.length} / ${restaurantsCache.length} 件`;
   if (!restaurantsCache.length) {
     list.innerHTML = `<div class="list-empty">店舗が見つかりません。「リスト更新」を押してください。</div>`;
     return;
   }
-  for (const r of restaurantsCache) {
+  if (!filtered.length) {
+    list.innerHTML = `<div class="list-empty">フィルタ条件に一致する店舗がありません</div>`;
+    return;
+  }
+  for (const r of filtered) {
     const row = document.createElement("div");
     row.className = "row";
     const subInfo = [r.area, r.genre].filter(Boolean).join(" · ");
@@ -189,14 +253,35 @@ function renderRestaurants() {
   }
 }
 
-$("#restSearch").addEventListener("input", (e) => loadRestaurants(e.target.value));
+$("#restSearch").addEventListener("input", (e) => {
+  restFilters.search = e.target.value;
+  renderRestaurants();
+});
+$("#filterRegion").addEventListener("change", (e) => {
+  restFilters.region = e.target.value;
+  // Reset prefecture if it's no longer compatible.
+  if (restFilters.prefecture && REGION_MAP[restFilters.prefecture] !== restFilters.region && restFilters.region) {
+    restFilters.prefecture = "";
+  }
+  rebuildFilterOptions();
+  renderRestaurants();
+});
+$("#filterPrefecture").addEventListener("change", (e) => {
+  restFilters.prefecture = e.target.value;
+  renderRestaurants();
+});
+$("#filterGenre").addEventListener("change", (e) => {
+  restFilters.genre = e.target.value;
+  renderRestaurants();
+});
+
 $("#refreshListBtn").addEventListener("click", async () => {
   const btn = $("#refreshListBtn");
   btn.disabled = true; btn.textContent = "更新中…";
   try {
     const r = await api.post("/api/restaurants/refresh");
     toast(`掲載店リスト更新: ${r.count} 件`);
-    await loadRestaurants($("#restSearch").value);
+    await loadRestaurants();
   } catch (e) {
     toast("更新失敗: " + e.message);
   } finally {

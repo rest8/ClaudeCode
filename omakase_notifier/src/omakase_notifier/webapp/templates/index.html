@@ -50,6 +50,12 @@
           <input id="restSearch" type="search" placeholder="店舗を検索…" />
           <button id="refreshListBtn" class="primary">リスト更新</button>
         </div>
+        <div class="filter-row">
+          <select id="filterRegion"><option value="">地域: すべて</option></select>
+          <select id="filterPrefecture"><option value="">都道府県: すべて</option></select>
+          <select id="filterGenre"><option value="">ジャンル: すべて</option></select>
+          <span class="filter-count" id="filterCount"></span>
+        </div>
         <div class="card list" id="restList"></div>
       </section>
 

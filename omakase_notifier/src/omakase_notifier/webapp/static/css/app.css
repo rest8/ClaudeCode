@@ -210,6 +210,36 @@ button { font-family: inherit; font-size: inherit; cursor: pointer; }
 .search-wrap {
   display: flex; gap: 8px; margin-bottom: 12px;
 }
+
+.filter-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.filter-row select {
+  flex: 1;
+  min-width: 160px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 0.5px solid var(--separator);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%238e8e93' d='M6 8L0 0h12z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 30px;
+}
+.filter-count {
+  font-size: 13px;
+  color: var(--muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
 input[type="search"], input[type="text"], input[type="email"], input[type="number"], input[type="time"], input[type="password"] {
   flex: 1;
   padding: 10px 12px;
