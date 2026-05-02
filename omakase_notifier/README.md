@@ -105,6 +105,31 @@ pip install -r requirements-desktop.txt
 > ネイティブウィンドウを使いたい場合は **Python 3.13** で動かしてください。
 > 失敗してもアプリ自体は問題なくブラウザモードで動きます。
 
+### Cloudflare クリアランス（必須・初回1回）
+
+omakase.in は Cloudflare のボット保護で守られています。
+**`setup_session.py` を 1 回実行**して、CF クリアランスクッキー
+（`cf_clearance`）を取得・保存しておく必要があります。これをやらないと
+2 ページ目以降の取得が必ずブロックされます。
+
+```powershell
+cd ClaudeCode\omakase_notifier
+python setup_session.py
+```
+
+実行すると Chromium ウィンドウが開き、`https://omakase.in/r` が
+表示されます。
+
+1. **店舗カード一覧が見える状態になるまで待つ**（赤い X や
+   "Just a moment..." が出たら数秒待って再読み込み）
+2. **Optional**: `https://omakase.in/r/page/2` も手動で開いて
+   問題なくロードされることを確認
+3. PowerShell に戻って **Enter キー**を押す
+4. `data/storage_state.json` にセッションが保存される
+
+このセッションは **約 30 日有効** です。期限切れ or CF にまた弾かれた
+場合は同じスクリプトをもう一度走らせてください。
+
 ### 起動方法（初回／2回目以降ともに）
 
 - **初回**: `python launcher.py`、または `install_windows.ps1` 実行直後

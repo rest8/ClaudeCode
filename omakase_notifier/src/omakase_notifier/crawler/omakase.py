@@ -1,24 +1,24 @@
 """Playwright-based crawler for omakase.in.
 
-IMPORTANT: omakase.in is a third-party reservation site. The selectors and
-URL patterns below are educated guesses based on common patterns for
-restaurant booking sites. Before relying on this in production you MUST:
-
-  1. Verify the site's Terms of Service permits this access pattern.
-  2. Run `python -m omakase_notifier.crawler.calibrate` (provided) against
-     a real listing page and a real restaurant page, and update the
-     selectors in `LIST_SELECTORS` / `AVAILABILITY_SELECTORS` to match.
-
-The crawler is deliberately defensive: if a selector fails to match it
-returns an empty result rather than crashing the scheduler.
+IMPORTANT: omakase.in is fronted by Cloudflare. To stay under the bot
+threshold we:
+  1. Reuse a one-shot manually-bootstrapped session (data/storage_state.json
+     produced by setup_session.py). This carries the cf_clearance cookie
+     and is good for ~30 days.
+  2. Sleep a randomized 5-10s between paginated requests.
+  3. Bail out as soon as a Cloudflare interstitial is detected, so we
+     don't burn through our reputation.
 """
 
 from __future__ import annotations
 
 import logging
+import random
 import re
+import time
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Iterator, Optional
 from urllib.parse import urljoin
 
@@ -52,6 +52,29 @@ LIST_SELECTORS = {
     "restaurant_name": "h1, h2, .restaurant-name, [data-testid='restaurant-name']",
     "next_page": 'a[rel="next"], a.pagination-next',
 }
+
+def _storage_path() -> Path:
+    """Where setup_session.py saves the Cloudflare-cleared cookies."""
+    # crawler/omakase.py -> ../../.. = project root (omakase_notifier/)
+    return Path(__file__).resolve().parents[3] / "data" / "storage_state.json"
+
+
+def _is_cloudflare_block(page) -> bool:
+    """Detect Cloudflare's block / challenge interstitials so we can
+    abort early instead of hammering until the IP is fully banned."""
+    try:
+        title = (page.title() or "").lower()
+    except Exception:  # noqa: BLE001
+        return False
+    return any(
+        s in title
+        for s in (
+            "just a moment",
+            "attention required",
+            "cloudflare",
+        )
+    )
+
 
 _DEFAULT_BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -141,16 +164,33 @@ class OmakaseCrawler:
                 or "OmakaseNotifier" in ua
             ):
                 ua = _DEFAULT_BROWSER_UA
-            context = browser.new_context(
-                user_agent=ua,
-                locale="ja-JP",
-                viewport={"width": 1280, "height": 900},
-            )
+            ctx_kwargs: dict = {
+                "user_agent": ua,
+                "locale": "ja-JP",
+                "viewport": {"width": 1280, "height": 900},
+            }
+            storage = _storage_path()
+            if storage.exists():
+                ctx_kwargs["storage_state"] = str(storage)
+                log.info("Reusing saved Cloudflare session: %s", storage)
+            else:
+                log.warning(
+                    "No saved session at %s. Run `python setup_session.py` "
+                    "to bootstrap one — without it Cloudflare will block "
+                    "paginated requests.",
+                    storage,
+                )
+            context = browser.new_context(**ctx_kwargs)
             context.add_init_script(_STEALTH_INIT_SCRIPT)
             context.set_default_timeout(self.request_timeout_ms)
             try:
                 yield pw, browser, context
             finally:
+                # Persist any cookie refresh CF issued during this run.
+                try:
+                    context.storage_state(path=str(storage))
+                except Exception:  # noqa: BLE001
+                    pass
                 context.close()
                 browser.close()
 
@@ -197,8 +237,14 @@ class OmakaseCrawler:
             page.close()
 
             # 2) Pages 2..N — open each in a fresh tab so the SPA can't
-            #    reuse cached state.
+            #    reuse cached state. Sleep 5-10s between requests and
+            #    bail out at the first Cloudflare block to avoid
+            #    triggering a longer ban.
+            cf_blocked = False
             for n in range(2, min(max_page, max_pages) + 1):
+                # Random pacing — this is the single most important
+                # thing for staying under CF's bot threshold.
+                time.sleep(random.uniform(5.0, 10.0))
                 np = ctx.new_page()
                 url = f"{BASE_URL}/r/page/{n}"
                 try:
@@ -206,6 +252,17 @@ class OmakaseCrawler:
                     np.wait_for_load_state(
                         "networkidle", timeout=self.request_timeout_ms
                     )
+                    if _is_cloudflare_block(np):
+                        log.error(
+                            "Page %d: Cloudflare block detected (title=%r). "
+                            "Stopping bulk crawl. Re-run setup_session.py "
+                            "to refresh the cf_clearance cookie, then wait "
+                            "an hour or so before retrying.",
+                            n,
+                            np.title(),
+                        )
+                        cf_blocked = True
+                        break
                     _scroll_to_bottom(np)
                     before = len(results)
                     self._collect_items(np, results)
@@ -221,7 +278,16 @@ class OmakaseCrawler:
                 finally:
                     np.close()
 
-            log.info("After pagination: %d restaurants", len(results))
+            log.info(
+                "After pagination: %d restaurants%s",
+                len(results),
+                " (truncated by Cloudflare)" if cf_blocked else "",
+            )
+
+            if cf_blocked:
+                # Don't pile on — sitemap and detail-fetch will get
+                # blocked too and may extend the ban.
+                return list(results.values())
 
             # 3) Sitemap fallback — discover IDs the listing didn't show.
             try:
@@ -237,7 +303,24 @@ class OmakaseCrawler:
                             len(missing),
                         )
                         for i, rid in enumerate(missing, 1):
+                            time.sleep(random.uniform(3.0, 6.0))
                             info = self._fetch_one_restaurant(helper, rid)
+                            if _is_cloudflare_block(helper):
+                                log.error(
+                                    "Detail fetch hit Cloudflare at #%d/%d; "
+                                    "stopping. Remaining IDs registered with "
+                                    "placeholder names.",
+                                    i,
+                                    len(missing),
+                                )
+                                for rrid in missing[i - 1 :]:
+                                    if rrid not in results:
+                                        results[rrid] = RestaurantInfo(
+                                            omakase_id=rrid,
+                                            name=rrid,
+                                            url=f"{BASE_URL}/r/{rrid}",
+                                        )
+                                break
                             if info is not None:
                                 results[rid] = info
                             else:
