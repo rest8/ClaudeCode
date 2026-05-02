@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://omakase.in"
 LIST_URL_CANDIDATES = [
+    "https://omakase.in/r",          # canonical full listing
     "https://omakase.in/ja",
     "https://omakase.in/ja/restaurants",
     "https://omakase.in/",
