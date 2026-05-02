@@ -53,6 +53,47 @@ LIST_SELECTORS = {
     "next_page": 'a[rel="next"], a.pagination-next',
 }
 
+_DEFAULT_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+# Injected before any page script runs. Hides the standard
+# "this is a bot" tells that omakase.in checks for.
+_STEALTH_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'plugins', {
+  get: () => [
+    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+    { name: 'Native Client', filename: 'internal-nacl-plugin' },
+  ],
+});
+Object.defineProperty(navigator, 'languages', {
+  get: () => ['ja-JP', 'ja', 'en-US', 'en'],
+});
+window.chrome = window.chrome || {
+  runtime: {}, loadTimes: function () {}, csi: function () {},
+  app: {}
+};
+const _origPermQuery = navigator.permissions && navigator.permissions.query;
+if (_origPermQuery) {
+  navigator.permissions.query = function (parameters) {
+    return parameters.name === 'notifications'
+      ? Promise.resolve({ state: Notification.permission })
+      : _origPermQuery(parameters);
+  };
+}
+// WebGL vendor / renderer
+const _getParameter = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function (parameter) {
+  if (parameter === 37445) return 'Intel Inc.';      // UNMASKED_VENDOR_WEBGL
+  if (parameter === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+  return _getParameter.call(this, parameter);
+};
+"""
+
 AVAILABILITY_SELECTORS = {
     # Calendar / slot containers commonly use data-date or aria-label.
     "available_slot": (
@@ -83,19 +124,29 @@ class OmakaseCrawler:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
                 headless=self.headless,
-                args=["--disable-blink-features=AutomationControlled"],
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=IsolateOrigins,site-per-process",
+                ],
             )
-            ctx_kwargs: dict = {
-                "locale": "ja-JP",
-                "viewport": {"width": 1280, "height": 900},
-            }
-            # Only override the UA when it looks like a real browser.
-            # Bot-style strings ("OmakaseNotifier/0.1") cause omakase.in
-            # to serve a stripped view in which paginated URLs all
-            # return page 1, masking restaurants on /r/page/2..N.
-            if self.user_agent and "Mozilla" in self.user_agent:
-                ctx_kwargs["user_agent"] = self.user_agent
-            context = browser.new_context(**ctx_kwargs)
+            # omakase.in inspects navigator.webdriver, the "HeadlessChrome"
+            # token in the UA, plugins, and window.chrome. If it sees a
+            # bot it serves a stripped-down view in which every paginated
+            # URL returns the same 32 cards. Force a realistic UA and a
+            # stealth init script that hides those tells.
+            ua = self.user_agent or ""
+            if (
+                "Mozilla" not in ua
+                or "HeadlessChrome" in ua
+                or "OmakaseNotifier" in ua
+            ):
+                ua = _DEFAULT_BROWSER_UA
+            context = browser.new_context(
+                user_agent=ua,
+                locale="ja-JP",
+                viewport={"width": 1280, "height": 900},
+            )
+            context.add_init_script(_STEALTH_INIT_SCRIPT)
             context.set_default_timeout(self.request_timeout_ms)
             try:
                 yield pw, browser, context
