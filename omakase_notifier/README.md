@@ -58,8 +58,9 @@ omakase_notifier/
 事前に **Python 3.12 / 3.13 / 3.14** のいずれかをインストールしてください
 （公式インストーラから「Add python.exe to PATH」にチェック）。
 
+### 推奨: ワンステップインストーラ
+
 ```powershell
-# プロジェクトルートで
 git clone <this-repo> ClaudeCode
 cd ClaudeCode\omakase_notifier
 powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
@@ -72,8 +73,28 @@ powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
 3. `config.example.yaml` を `config.yaml` にコピー（既存はそのまま）
 4. デスクトップに **「Omakase Notifier」** ショートカットを作成
 
-ショートカットをダブルクリックするとターミナル風の管理 UI が起動し、
-バックグラウンドでポーリングサービスも動き始めます。
+### 手動セットアップでも可
+
+`pip install` を直接使った場合、デスクトップショートカットは
+**初回起動時にアプリが自動作成** します。手順は次の通りです:
+
+```powershell
+cd ClaudeCode\omakase_notifier
+pip install -r requirements.txt
+python -m playwright install chromium
+copy config.example.yaml config.yaml
+notepad config.yaml             # SMTP / LINE 等を設定
+python launcher.py              # ← 初回はここから起動。終了後デスクトップにアイコンが出来る
+```
+
+### 起動方法（初回／2回目以降ともに）
+
+- **初回**: `python launcher.py`、または `install_windows.ps1` 実行直後
+  に作成されるデスクトップアイコンをダブルクリック
+- **2回目以降**: デスクトップの **「Omakase Notifier」** をダブルクリック
+
+ショートカットが消えた／別 PC へ移したときは、もう一度 `python launcher.py`
+を実行すれば再生成されます（既存があれば何もしません）。
 
 ### config.yaml を編集
 

@@ -48,20 +48,23 @@ if (-not (Test-Path "config.yaml")) {
 # 3. data dir
 New-Item -ItemType Directory -Force -Path "data" | Out-Null
 
-# 4. desktop shortcut
+# 4. desktop shortcut (also auto-created on first app launch via bootstrap.py)
 $desktop = [Environment]::GetFolderPath("Desktop")
 $shortcutPath = Join-Path $desktop "Omakase Notifier.lnk"
+$pyw = Join-Path $root ".venv\Scripts\pythonw.exe"
+$launcher = Join-Path $root "launcher.py"
+
 $wshell = New-Object -ComObject WScript.Shell
 $shortcut = $wshell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = (Join-Path $root "scripts\start.bat")
+$shortcut.TargetPath = $pyw
+$shortcut.Arguments = "`"$launcher`""
 $shortcut.WorkingDirectory = $root
-$shortcut.WindowStyle = 7  # minimized launcher
 
 $iconPath = Join-Path $root "assets\icon.ico"
 if (Test-Path $iconPath) {
     $shortcut.IconLocation = "$iconPath,0"
 } else {
-    $shortcut.IconLocation = "$($py),0"
+    $shortcut.IconLocation = "$pyw,0"
 }
 $shortcut.Save()
 

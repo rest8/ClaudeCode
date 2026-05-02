@@ -14,6 +14,7 @@ from pathlib import Path
 from tkinter import font as tkfont
 from tkinter.scrolledtext import ScrolledText
 
+from ..bootstrap import ensure_desktop_shortcut
 from ..config import Config, default_config_path
 from ..db import init_engine
 from ..service import Service
@@ -169,11 +170,16 @@ def run() -> None:
     )
     config = Config.load(default_config_path())
     init_engine(config)
+    shortcut = ensure_desktop_shortcut()
     service = Service(config)
     service.start()
 
     root = tk.Tk()
-    TerminalApp(root, service)
+    app = TerminalApp(root, service)
+    if shortcut is not None:
+        app._write(  # noqa: SLF001
+            f"[setup] Desktop shortcut ready: {shortcut}", tag="info"
+        )
     try:
         root.mainloop()
     finally:
