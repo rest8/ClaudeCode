@@ -39,13 +39,16 @@ omakase_notifier/
 │   ├── uninstall_windows.ps1
 │   └── start.bat            # ショートカットから呼ばれる起動スクリプト
 ├── src/omakase_notifier/
-│   ├── admin_ui/            # ターミナル風 GUI（Tkinter）
-│   │   ├── app.py
-│   │   └── commands.py
+│   ├── webapp/              # iOS 風 Web UI（FastAPI + 静的資産）
+│   │   ├── app.py           # REST API
+│   │   ├── templates/index.html
+│   │   └── static/{css,js}
+│   ├── desktop.py           # pywebview ネイティブウィンドウ起動
 │   ├── crawler/             # Playwright クローラ
 │   │   ├── omakase.py
 │   │   └── calibrate.py     # セレクタ調整用ヘルパ
 │   ├── notifier/            # メール / LINE 送信
+│   ├── bootstrap.py         # 初回起動時のデスクトップショートカット作成
 │   ├── config.py
 │   ├── db.py
 │   ├── models.py
@@ -96,62 +99,30 @@ python launcher.py              # ← 初回はここから起動。終了後デ
 ショートカットが消えた／別 PC へ移したときは、もう一度 `python launcher.py`
 を実行すれば再生成されます（既存があれば何もしません）。
 
-### config.yaml を編集
+### 初回設定
 
-`config.yaml` を開き、最低限以下を設定します:
+初回起動はそのまま `config.yaml` が空のままでも UI は立ち上がりますが、
+**右上の歯車アイコン → 設定** から以下を入れてください:
 
-- `email.smtp_*` および `from_address`
-- LINE 通知を使うなら `line.channel_access_token`
-- ポーリング間隔の初期値 `app.poll_interval_seconds`
+- SMTP (`smtp_host` / `smtp_port` / `smtp_user` / `smtp_password` / `from_address`)
+- LINE 通知を使うなら **Channel access token**
+- ポーリング間隔（既定 300 秒 / 0.1 秒単位で変更可）
 
-## 管理コンソールの使い方
+設定は `config.yaml` に書き戻されるので、再起動しても保持されます。
 
-起動後、`omakase>` プロンプトに対して以下のコマンドが使えます。
-`help` で一覧表示。
+## UI の使い方
 
-```text
-help                                    コマンド一覧
-status                                  サービス状態
-start | stop                            ポーリングの開始 / 停止
-interval <seconds>                      ポーリング間隔を変更（>= 0.1s）
-refresh-list                            掲載店リストを今すぐ再取得
+下部のタブバーで 3 画面を切り替えます。
 
-users add <name> [--email=X] [--line=Y] [--off]
-users list
-users remove <user_id>
-users enable <user_id> | disable <user_id>
+| タブ | 内容 |
+| --- | --- |
+| **ホーム** | 月ビューカレンダー。空席のある日付に● ドットが付く。日付タップで店舗・時間・人数・料金・キャンセル規定を一覧表示 |
+| **店舗** | Omakase 掲載店の全件リスト（名称・エリア・ジャンル）。検索 + 「リスト更新」ボタン。行タップで購読ユーザーをチェックボックスで切替 |
+| **ユーザー** | ユーザーの追加 / 編集 / 削除。メール・LINE ID・有効/無効スイッチ。各ユーザーの購読店舗を追加 / 解除 |
 
-restaurants list [keyword]              掲載店一覧（キーワード検索可）
-restaurants show <restaurant_id>
-
-subscribe <user_id> <restaurant_id> [--email/--no-email] [--line/--no-line]
-                                        [--min=N --max=M]
-subscriptions list [user_id]
-unsubscribe <subscription_id>
-
-logs [count]                            直近の通知送信ログ
-quit                                    UI 終了（サービスも停止）
-```
-
-### 典型的な手順（管理者）
-
-```text
-omakase> refresh-list
-refreshed: 312 restaurants.
-
-omakase> users add Taro --email=taro@example.com
-added user id=1
-
-omakase> restaurants list 鮨
-ID    OMAKASE_ID           NAME
-12    sushi-xxx            鮨◯◯
-...
-
-omakase> subscribe 1 12 --email --min=2 --max=4
-subscribed: id=1
-```
-
-通知が飛ぶと `logs` コマンドで結果を確認できます。
+カレンダーの● ドットは、**全ユーザーが購読している店舗の空席状況**
+（≒ 実際にサービスがポーリングしているデータ）を反映します。
+未購読の店舗は空席判定の対象外です。
 
 ## クローラのキャリブレーション
 
@@ -181,8 +152,12 @@ Omakase の DOM 構造に依存します。サイト構造が変わったとき�
 
 - 本実装は **MVP** です。将来的な拡張候補:
   - LINE 友だち追加用の OAuth フロー（公式アカウント連携）
-  - 管理者用の Web UI（Tkinter ではなく FastAPI ベース）
   - 通知メッセージのテンプレート機能
-  - サービス化（`nssm` で Windows サービスとして常駐）
+  - サービス化（`nssm` で Windows サービスとして常駐 / システムトレイ常駐）
+  - クローラのジャンル抽出強化（`Restaurant.genre` を Omakase の DOM から取得）
 - 高頻度ポーリングはサーバへの負荷・規約違反になり得ます。
   既定の 300 秒（5 分）から大きく短くしないでください。
+- pywebview は内部的に Edge WebView2 を利用します。Win10/11 にはほぼ標準で
+  入っていますが、未インストール環境では Microsoft の WebView2 ランタイムを
+  別途インストールしてください。失敗した場合は既定ブラウザで `localhost`
+  に自動フォールバックします。

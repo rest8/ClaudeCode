@@ -13,6 +13,8 @@ class AppConfig(BaseModel):
     database_url: str = "sqlite:///./data/omakase.db"
     headless: bool = True
     user_agent: str = "OmakaseNotifier/0.1"
+    web_host: str = "127.0.0.1"
+    web_port: int = 8765
 
 
 class EmailConfig(BaseModel):
@@ -48,6 +50,18 @@ class Config(BaseModel):
             return cls()
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         return cls.model_validate(data)
+
+    def save(self, path: Optional[Path] = None) -> None:
+        path = path or default_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump(
+                self.model_dump(),
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
 
 
 def project_root() -> Path:

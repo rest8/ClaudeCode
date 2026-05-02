@@ -96,6 +96,15 @@ class Service:
             replace_existing=True,
         )
 
+    def reschedule_list_refresh(self, hhmm: str) -> None:
+        self.config.app.list_refresh_time = hhmm
+        self._reschedule_list(hhmm)
+        self._log(f"List refresh time set to {hhmm}.")
+
+    def run_poll_now(self) -> None:
+        """Trigger an availability poll immediately, off the scheduler."""
+        threading.Thread(target=self._run_availability_poll, daemon=True).start()
+
     # -------- Jobs --------
     def refresh_restaurant_list(self) -> int:
         """Re-fetch the master list of restaurants and upsert into DB.

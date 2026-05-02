@@ -1,0 +1,383 @@
+/* ----- iOS-inspired theme ----- */
+
+:root {
+  --bg: #f2f2f7;
+  --bg-elev: #ffffff;
+  --bg-grouped: #efeff4;
+  --separator: rgba(60, 60, 67, 0.18);
+  --separator-soft: rgba(60, 60, 67, 0.10);
+  --text: #1c1c1e;
+  --text-2: #3c3c43;
+  --muted: rgba(60, 60, 67, 0.6);
+  --tint: #007aff;
+  --tint-soft: rgba(0, 122, 255, 0.12);
+  --green: #34c759;
+  --red: #ff3b30;
+  --orange: #ff9500;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 24px rgba(0, 0, 0, 0.04);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --nav-h: 56px;
+  --tab-h: 64px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --bg-elev: #1c1c1e;
+    --bg-grouped: #1c1c1e;
+    --separator: rgba(84, 84, 88, 0.65);
+    --separator-soft: rgba(84, 84, 88, 0.35);
+    --text: #ffffff;
+    --text-2: #ebebf5;
+    --muted: rgba(235, 235, 245, 0.6);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro",
+               "Helvetica Neue", "Segoe UI", "Yu Gothic UI",
+               "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-size: 15px;
+}
+
+button { font-family: inherit; font-size: inherit; cursor: pointer; }
+
+#app {
+  display: grid;
+  grid-template-rows: var(--nav-h) 1fr var(--tab-h);
+  height: 100vh;
+}
+
+/* ---------------- Navbar ---------------- */
+.navbar {
+  background: var(--bg-elev);
+  border-bottom: 0.5px solid var(--separator);
+  position: relative;
+  z-index: 5;
+}
+.navbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: var(--nav-h);
+}
+.nav-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.nav-btn {
+  background: transparent;
+  border: none;
+  color: var(--tint);
+  padding: 8px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-btn:active { background: var(--tint-soft); }
+
+/* ---------------- Content / Views ---------------- */
+.content {
+  overflow-y: auto;
+  padding: 16px;
+}
+.view { display: none; }
+.view.active { display: block; }
+
+.card {
+  background: var(--bg-elev);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 14px 16px 6px;
+}
+
+.muted { color: var(--muted); }
+
+/* ---------------- Calendar ---------------- */
+.calendar { padding: 14px 12px 16px; }
+.cal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 6px 8px;
+}
+.cal-title { font-size: 17px; font-weight: 600; }
+.ghost {
+  background: transparent; border: none;
+  color: var(--tint); font-size: 24px;
+  width: 36px; height: 36px; border-radius: 8px;
+}
+.ghost:active { background: var(--tint-soft); }
+
+.cal-weekdays, .cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+.cal-weekdays {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  padding: 4px 0;
+}
+.cal-weekdays .sat { color: #4a90e2; }
+.cal-weekdays .sun { color: var(--red); }
+
+.cal-grid {
+  gap: 2px;
+  margin-top: 4px;
+}
+.cal-cell {
+  min-height: 52px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 6px;
+  font-size: 15px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  position: relative;
+}
+.cal-cell.empty { visibility: hidden; }
+.cal-cell.has-slots { color: var(--text); }
+.cal-cell .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--tint); margin-top: 4px;
+}
+.cal-cell.selected {
+  background: var(--tint);
+  color: white;
+}
+.cal-cell.selected .dot { background: white; }
+.cal-cell.today {
+  font-weight: 700;
+}
+.cal-cell.today:not(.selected) { color: var(--tint); }
+
+/* slot list */
+#dayDetail h2#dayTitle { padding-top: 16px; }
+.slot-list { list-style: none; padding: 0; margin: 0; }
+.slot-list li {
+  padding: 12px 16px;
+  border-top: 0.5px solid var(--separator-soft);
+}
+.slot-list li:first-child { border-top: none; }
+.slot-list .name { font-weight: 600; font-size: 16px; }
+.slot-list .meta {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.slot-list .meta a { color: var(--tint); text-decoration: none; }
+.slot-list .cancel {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+}
+.day-empty { padding: 12px 16px 16px; }
+
+/* ---------------- Restaurants ---------------- */
+.search-wrap {
+  display: flex; gap: 8px; margin-bottom: 12px;
+}
+input[type="search"], input[type="text"], input[type="email"], input[type="number"], input[type="time"], input[type="password"] {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 0.5px solid var(--separator);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 15px;
+}
+input:focus { outline: 2px solid var(--tint); outline-offset: -1px; }
+
+.list { padding: 0; }
+.list .row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 0.5px solid var(--separator-soft);
+  cursor: pointer;
+}
+.list .row:first-child { border-top: none; }
+.list .row:active { background: var(--separator-soft); }
+.list .row .left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.list .row .name { font-weight: 600; }
+.list .row .sub { color: var(--muted); font-size: 12px; }
+.list .row .badge {
+  background: var(--green); color: white; font-size: 11px;
+  padding: 2px 8px; border-radius: 999px;
+}
+.list .row .chevron { color: var(--muted); margin-left: 8px; }
+.list-empty { padding: 24px; text-align: center; color: var(--muted); }
+
+/* ---------------- Users ---------------- */
+.users-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.pane-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 4px 8px;
+}
+.users-detail .card { padding-bottom: 8px; }
+.field {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 16px;
+  border-top: 0.5px solid var(--separator-soft);
+}
+.field:first-child { border-top: none; }
+.field label {
+  font-size: 12px; color: var(--muted); font-weight: 600;
+}
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 0.5px solid var(--separator-soft);
+}
+.toggle-row label { font-size: 15px; }
+
+/* iOS-style switch */
+.switch {
+  position: relative; display: inline-block; width: 51px; height: 31px;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #e9e9eb; border-radius: 31px;
+  transition: .15s;
+}
+.slider:before {
+  position: absolute; content: "";
+  height: 27px; width: 27px;
+  left: 2px; bottom: 2px;
+  background-color: white;
+  border-radius: 50%;
+  transition: .15s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+.switch input:checked + .slider { background-color: var(--green); }
+.switch input:checked + .slider:before { transform: translateX(20px); }
+
+/* ---------------- Buttons ---------------- */
+.primary {
+  background: var(--tint); color: white; border: none;
+  padding: 9px 16px; border-radius: 999px;
+  font-weight: 600; font-size: 14px;
+}
+.primary:active { opacity: 0.85; }
+.primary.small { padding: 6px 12px; font-size: 13px; }
+.danger {
+  background: var(--red); color: white; border: none;
+  padding: 9px 16px; border-radius: 999px;
+  font-weight: 600; font-size: 14px;
+}
+.btn-text { background: transparent; border: none; color: var(--tint); font-weight: 500; }
+
+/* ---------------- Tab bar ---------------- */
+.tabbar {
+  position: relative;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: saturate(150%) blur(20px);
+  -webkit-backdrop-filter: saturate(150%) blur(20px);
+  border-top: 0.5px solid var(--separator);
+  display: flex;
+  z-index: 5;
+}
+@media (prefers-color-scheme: dark) {
+  .tabbar { background: rgba(28,28,30,0.85); }
+}
+.tab {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 6px 0 4px;
+}
+.tab.active { color: var(--tint); }
+.tab svg { stroke: currentColor; }
+
+/* ---------------- Modal sheet ---------------- */
+.modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: flex-end; justify-content: center;
+  z-index: 100;
+}
+.modal.hidden { display: none; }
+.sheet {
+  background: var(--bg);
+  width: 100%;
+  max-width: 720px;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: slideUp 0.18s ease-out;
+}
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.sheet-handle {
+  width: 36px; height: 5px; border-radius: 999px;
+  background: var(--separator);
+  margin: 8px auto 4px;
+}
+.sheet-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 0.5px solid var(--separator-soft);
+}
+.sheet-title { margin: 0; font-size: 16px; font-weight: 600; }
+.sheet-cancel, .sheet-save {
+  background: transparent; border: none; color: var(--tint);
+  font-size: 15px; padding: 8px;
+}
+.sheet-save { font-weight: 600; }
+.sheet-body { padding: 16px; }
+
+/* ---------------- Toast ---------------- */
+.toast {
+  position: fixed;
+  bottom: calc(var(--tab-h) + 16px);
+  left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.85); color: white;
+  padding: 10px 18px; border-radius: 999px;
+  font-size: 13px;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.toast.hidden { display: none; }

@@ -1,6 +1,6 @@
-"""Entry point: `python -m omakase_notifier` launches the admin UI."""
+"""Entry point: `python -m omakase_notifier` launches the desktop UI."""
 
-from .admin_ui import run
+from .desktop import run
 
 if __name__ == "__main__":
     run()
