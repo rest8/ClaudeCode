@@ -55,7 +55,7 @@ omakase_notifier/
 
 ## セットアップ（Windows）
 
-事前に **Python 3.11 以降** をインストールしてください
+事前に **Python 3.12 / 3.13 / 3.14** のいずれかをインストールしてください
 （公式インストーラから「Add python.exe to PATH」にチェック）。
 
 ```powershell

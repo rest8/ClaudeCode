@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -97,7 +97,7 @@ class NotificationDispatcher:
                     channel=channel,
                     slot_datetime=s.slot_datetime,
                     party_size=s.party_size,
-                    sent_at=datetime.utcnow(),
+                    sent_at=datetime.now(timezone.utc),
                     success=success,
                     error=error,
                 )
