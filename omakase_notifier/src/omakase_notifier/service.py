@@ -53,7 +53,14 @@ class Service:
         self.scheduler.start()
         self._reschedule_poll(self.config.app.poll_interval_seconds)
         self._reschedule_list(self.config.app.list_refresh_time)
-        self._log("Service started.")
+        self._log(
+            "Service started. (headless=%s, poll_interval=%gs, list_refresh=%s)"
+            % (
+                self.config.app.headless,
+                self.config.app.poll_interval_seconds,
+                self.config.app.list_refresh_time,
+            )
+        )
 
     def stop(self) -> None:
         if self.scheduler.running:
