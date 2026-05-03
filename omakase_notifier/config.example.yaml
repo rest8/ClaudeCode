@@ -20,6 +20,14 @@ app:
   # /r/page/N URL returns the same content.
   headless: false
 
+  # If you keep getting blocked by Cloudflare, switch to CDP attach
+  # mode: launch your real Chrome via scripts\start_chrome_for_omakase.bat
+  # (which adds --remote-debugging-port=9222) and set use_cdp: true.
+  # The crawler then attaches to that Chrome instead of launching its
+  # own — Cloudflare cannot tell the difference from normal browsing.
+  use_cdp: false
+  cdp_url: "http://localhost:9222"
+
   # User-Agent the crawler advertises.
   # Note: omakase.in serves a stripped-down view (no pagination, no
   # sitemap) to obvious bot UAs. Use a realistic Chrome string here.

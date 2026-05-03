@@ -42,6 +42,8 @@ class Service:
             captcha_provider=config.captcha.provider,
             captcha_api_key=config.captcha.api_key,
             captcha_timeout=config.captcha.timeout_seconds,
+            use_cdp=config.app.use_cdp,
+            cdp_url=config.app.cdp_url,
         )
         self.dispatcher = NotificationDispatcher(config)
         self.scheduler = BackgroundScheduler(timezone="Asia/Tokyo")

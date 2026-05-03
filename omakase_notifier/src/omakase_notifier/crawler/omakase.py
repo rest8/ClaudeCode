@@ -245,6 +245,8 @@ class OmakaseCrawler:
         captcha_provider: str = "",
         captcha_api_key: str = "",
         captcha_timeout: int = 180,
+        use_cdp: bool = False,
+        cdp_url: str = "http://localhost:9222",
     ):
         self.headless = headless
         self.user_agent = user_agent
@@ -252,15 +254,49 @@ class OmakaseCrawler:
         self.captcha_provider = captcha_provider
         self.captcha_api_key = captcha_api_key
         self.captcha_timeout = captcha_timeout
+        self.use_cdp = use_cdp
+        self.cdp_url = cdp_url
 
     @contextmanager
     def _browser(self) -> Iterator[tuple[Playwright, Optional[Browser], BrowserContext]]:
-        """Open a Chromium with a *persistent* user data dir under
-        data/chrome_profile/. Cookies (notably cf_clearance), local
-        storage, and browser fingerprints all survive across runs, so
-        Cloudflare treats us as a returning visitor instead of a
-        burst-y bot every time.
+        """Open a Chromium for crawling. Two modes:
+
+        - CDP attach (use_cdp=True): connect to the user's already-running
+          real Chrome at cdp_url. Bypasses Cloudflare because the browser
+          is genuinely the user's normal Chrome session, not Playwright's
+          bundled Chromium.
+        - Persistent profile (default): launch our own Chromium with
+          data/chrome_profile/ as the user data dir + tf-playwright-stealth.
         """
+        if self.use_cdp:
+            with sync_playwright() as pw:
+                try:
+                    browser = pw.chromium.connect_over_cdp(self.cdp_url)
+                except Exception as exc:  # noqa: BLE001
+                    raise RuntimeError(
+                        f"CDP connect to {self.cdp_url} failed: {exc}. "
+                        "Run scripts\\start_chrome_for_omakase.bat first "
+                        "to launch Chrome with --remote-debugging-port=9222."
+                    ) from exc
+                # Use the existing default context if Chrome already has
+                # one (which it always does on first launch).
+                if browser.contexts:
+                    context = browser.contexts[0]
+                else:
+                    context = browser.new_context(
+                        locale="ja-JP", timezone_id="Asia/Tokyo"
+                    )
+                context.set_default_timeout(self.request_timeout_ms)
+                try:
+                    yield pw, browser, context
+                finally:
+                    # Disconnect (does NOT close the user's Chrome).
+                    try:
+                        browser.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+            return
+
         with sync_playwright() as pw:
             profile = _profile_dir()
             profile.mkdir(parents=True, exist_ok=True)

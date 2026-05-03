@@ -18,6 +18,15 @@ class AppConfig(BaseModel):
     # If you need headless on a server with no display, use a virtual
     # framebuffer (Xvfb) and accept that some pages may be missed.
     headless: bool = False
+
+    # CDP attach mode — connect to an already-running Chrome started
+    # via scripts/start_chrome_for_omakase.bat (Chrome must have
+    # --remote-debugging-port=9222). Far more bypass-resistant than any
+    # stealth library because the browser is genuinely the user's
+    # real Chrome session. When false, the app launches its own
+    # Chromium with the persistent profile.
+    use_cdp: bool = False
+    cdp_url: str = "http://localhost:9222"
     # Default to a realistic Chrome UA. omakase.in serves a stripped-down
     # view (no pagination, no sitemap) to obvious bot User-Agents.
     user_agent: str = (

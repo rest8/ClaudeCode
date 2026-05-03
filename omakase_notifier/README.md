@@ -129,6 +129,42 @@ pip install -r requirements-desktop.txt
 - 2captcha を設定済み → 自動で解決（数十秒）
 - 未設定 → 表示されている Chromium ウィンドウでチェックを入れる（数秒）
 
+### CDP attach モード（最強対策・どうしても弾かれる場合）
+
+stealth + 2captcha でも CF に弾かれる場合の最終手段。
+Playwright が **あなたの実 Chrome に接続**するモードです。本物の
+Chrome なので CF からは「ただの利用者」にしか見えません。
+
+#### 使い方
+
+1. **Chrome 専用インスタンスを起動**:
+   ```powershell
+   scripts\start_chrome_for_omakase.bat
+   ```
+   専用プロファイルの Chrome ウィンドウが開きます（普段使いの
+   Chrome とは別領域）。
+2. **そのウィンドウで一度 omakase.in/r を表示**。CF のチャレンジが
+   出たら自分で通過（チェックボックス）。
+3. **`config.yaml` で CDP モードを有効化**:
+   ```yaml
+   app:
+     use_cdp: true
+     cdp_url: "http://localhost:9222"
+   ```
+4. **Omakase Notifier を再起動**:
+   ```powershell
+   Get-Process python, pythonw -ErrorAction SilentlyContinue | Stop-Process -Force
+   python launcher.py
+   ```
+
+これで「リスト更新」「空席ポーリング」「Warmup」全てがその Chrome
+を経由します。CF は本物のあなたを区別できないので、ほぼ確実に通過
+します。
+
+**前提**: Chrome ウィンドウを閉じないでください。閉じると
+CDP 接続が切れます。バッチをタスクスケジューラに登録すると
+PC 起動時に自動起動できます。
+
 ### 2captcha 連携（任意）
 
 Turnstile を完全自動化したい場合のみ:
