@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.report-prose h2 {
+  @apply mt-8 mb-3 text-xl font-bold text-rose-900 border-l-4 border-rose-400 pl-3;
+}
+
+.report-prose h3 {
+  @apply mt-5 mb-2 text-lg font-semibold text-violet-800;
+}
+
+.report-prose p {
+  @apply my-3 leading-relaxed text-slate-800;
+}
+
+.report-prose ul {
+  @apply list-disc list-inside my-3 space-y-1 text-slate-800;
+}
+
+.report-prose ol {
+  @apply list-decimal list-inside my-3 space-y-1 text-slate-800;
+}
+
+.report-prose blockquote {
+  @apply mt-6 border-l-4 border-amber-300 bg-amber-50/70 px-4 py-2 text-sm text-amber-900 italic;
+}
+
+.report-prose strong {
+  @apply text-rose-700;
+}
+
+.report-prose hr {
+  @apply my-6 border-rose-100;
+}
