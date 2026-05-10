@@ -53,14 +53,72 @@ npm run dev
 
 | パス | 役割 |
 | --- | --- |
-| `app/page.tsx` | 入力フォーム & レポート表示画面 |
-| `app/api/fortune/route.ts` | Claude API を呼び出すサーバーエンドポイント |
+| `app/page.tsx` | 入力フォーム & レポート表示画面 (Web版) |
+| `app/api/fortune/route.ts` | Web フォームから呼ばれる Claude API エンドポイント |
+| `app/api/line/webhook/route.ts` | LINE Messaging API の Webhook 受け口 |
 | `lib/renreki.ts` | 12 オーラ判定の決定論的ロジック |
 | `lib/mbti.ts` | 16 MBTI タイプの定義 |
 | `lib/prompt.ts` | Claude へのシステム / ユーザープロンプト |
-| `lib/markdown.ts` | 軽量な Markdown レンダラ |
-| `components/FortuneForm.tsx` | 5 項目の入力フォーム |
-| `components/FortuneResult.tsx` | オーラサマリ & レポート表示 |
+| `lib/fortune.ts` | Renreki + Claude を呼んでレポート生成 (Web/LINE 共通) |
+| `lib/chat/session.ts` | LINE Bot のインメモリ会話セッション |
+| `lib/chat/flow.ts` | 5 項目ヒアリングのステートマシン & メッセージ生成 |
+| `lib/chat/parser.ts` | ユーザー入力 (性別/日付/MBTI など) のパーサ |
+| `lib/line/*` | LINE Messaging API の最小クライアント & 署名検証 |
+| `lib/markdown.ts` | 軽量な Markdown レンダラ (Web版) |
+| `components/FortuneForm.tsx` | Web 版の 5 項目入力フォーム |
+| `components/FortuneResult.tsx` | Web 版のオーラサマリ & レポート表示 |
+
+## LINE Bot として動かす
+
+Web フォームに加え、LINE 上で AI 占い師「縁」が 5 項目をヒアリング → 鑑定結果を
+返すモードも同梱しています。
+
+### 1. LINE Developers でチャネルを作る
+
+1. https://developers.line.biz/console/ にログイン
+2. プロバイダー → 新規チャネル → **Messaging API** を作成
+3. 作成後、以下を控える:
+   - **Channel secret** (Basic settings)
+   - **Channel access token (long-lived)** (Messaging API → 「発行」)
+4. **応答メッセージ / あいさつメッセージは OFF**、**Webhook 利用は ON** に設定
+
+### 2. Webhook URL を設定
+
+公開された HTTPS URL の `/api/line/webhook` を Webhook URL に登録します。
+
+- 本番: 例 `https://<your-domain>/api/line/webhook` (Vercel など)
+- ローカル開発: [ngrok](https://ngrok.com/) などでトンネル
+  ```bash
+  ngrok http 3000
+  # → https://xxxx.ngrok-free.app/api/line/webhook を Webhook URL に設定
+  ```
+
+### 3. 環境変数
+
+`.env.local` に下記を追加:
+
+```bash
+LINE_CHANNEL_SECRET=...
+LINE_CHANNEL_ACCESS_TOKEN=...
+```
+
+### 4. 友だち追加 → ヒアリング開始
+
+LINE 公式アカウントを友だち追加して話しかけると、
+
+1. 性別 (クイックリプライ: 男性 / 女性)
+2. 生年月日 (日付ピッカー or テキスト)
+3. 10代で親元を離れたか (はい / いいえ)
+4. 甘やかされて育ったか (はい / いいえ)
+5. MBTI (4 文字のテキスト入力)
+
+を順に聞かれ、回答が揃うと Claude が鑑定レポートを送り返します。
+
+### 注意事項 (LINE Bot)
+
+- 会話状態は **インメモリ** で保持しているため、サーバ再起動 / コールドスタートで消えます。本番では Redis などへ差し替えてください。
+- Vercel の Hobby プランでは最大関数実行時間が短いため、Claude の応答が遅いとタイムアウトすることがあります。`ANTHROPIC_MODEL=claude-haiku-4-5-20251001` に切り替える、もしくは Pro プランへ変更を検討してください。
+- Webhook の署名検証は HMAC-SHA256 で行っています (`lib/line/verify.ts`)。
 
 ## 12 オーラ一覧 (本実装でのマッピング)
 

@@ -1,12 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
+import { generateFortune } from "@/lib/fortune";
 import { MBTI_TYPES, MbtiType } from "@/lib/mbti";
-import { buildUserPrompt, FortuneRequest, SYSTEM_PROMPT } from "@/lib/prompt";
-import { runRenreki } from "@/lib/renreki";
+import { FortuneRequest } from "@/lib/prompt";
 
 export const runtime = "nodejs";
-
-const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
 function parseBody(body: unknown): FortuneRequest | { error: string } {
   if (!body || typeof body !== "object") {
@@ -73,25 +70,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
-  const renreki = runRenreki(parsed);
-  const userPrompt = buildUserPrompt(parsed, renreki);
-
-  const client = new Anthropic({ apiKey });
-
   try {
-    const message = await client.messages.create({
-      model: MODEL,
-      max_tokens: 2400,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userPrompt }],
-    });
-
-    const text = message.content
-      .map((c) => (c.type === "text" ? c.text : ""))
-      .join("\n")
-      .trim();
-
-    return NextResponse.json({ profile: renreki, report: text });
+    const outcome = await generateFortune(parsed, apiKey);
+    return NextResponse.json(outcome);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Claude API 呼び出しに失敗しました。";
     return NextResponse.json({ error: msg }, { status: 502 });
