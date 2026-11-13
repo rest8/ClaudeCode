@@ -71,40 +71,108 @@ def desktop_dir() -> Path:
 
 
 def _powershell(script: str) -> str:
+    """PowerShell を実行して標準出力を返す。スクリプトが「ERROR: …」を出して終了したら OSError."""
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
-        capture_output=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        capture_output=True, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
+    out = result.stdout.decode("utf-8", "replace").strip()
     if result.returncode != 0:
-        detail = result.stderr.decode("utf-8", "replace").strip() or result.stdout.decode("utf-8", "replace").strip()
-        raise OSError(detail or "PowerShell の実行に失敗しました")
-    return result.stdout.decode("utf-8", "replace").strip()
+        errors = [line[6:].strip() for line in out.splitlines() if line.startswith("ERROR:")]
+        raise OSError("\n".join(errors) or f"PowerShell の実行に失敗しました（終了コード {result.returncode}）")
+    return out.splitlines()[-1].strip() if out else ""
+
+
+# Windows のショートカット API（IShellLinkW）を直接使う C# コード。
+# WScript.Shell は ANSI 経由で保存するため、英語版 Windows などでは日本語のファイル名が「????」になり保存に失敗する。
+_SHELL_LINK_CS = r"""
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+
+namespace SalesMailerShortcut {
+    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IShellLinkW {
+        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cch, IntPtr pfd, uint fFlags);
+        void GetIDList(out IntPtr ppidl);
+        void SetIDList(IntPtr pidl);
+        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cch);
+        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cch);
+        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cch);
+        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+        void GetHotkey(out short pwHotkey);
+        void SetHotkey(short wHotkey);
+        void GetShowCmd(out int piShowCmd);
+        void SetShowCmd(int iShowCmd);
+        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cch, out int piIcon);
+        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+        void Resolve(IntPtr hwnd, uint fFlags);
+        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+    }
+
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+    class ShellLink {
+    }
+
+    public static class Creator {
+        public static void Create(string path, string target, string arguments, string workdir,
+                                  string iconPath, int iconIndex, string description) {
+            IShellLinkW link = (IShellLinkW)new ShellLink();
+            link.SetPath(target);
+            link.SetArguments(arguments);
+            link.SetWorkingDirectory(workdir);
+            link.SetIconLocation(iconPath, iconIndex);
+            link.SetDescription(description);
+            ((IPersistFile)link).Save(path, false);
+        }
+    }
+}
+"""
 
 
 def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def windows_script(target: str, args: list[str], workdir: Path, icon: str) -> str:
+def windows_script(target: str, args: list[str], workdir: Path, icon_path: str, icon_index: int = 0) -> str:
     arguments = " ".join(f'"{a}"' for a in args)
+    description = APP_TITLE + "（ターミナル版）"
+    values = [_ps_quote(v) for v in (target, arguments, str(workdir), icon_path)]
     return "\n".join([
-        "$ErrorActionPreference = 'Stop'",  # 途中で失敗したら終了コードで分かるようにする
+        "$ErrorActionPreference = 'Stop'",
+        "$ProgressPreference = 'SilentlyContinue'",
         "try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}",
-        "$desktop = [Environment]::GetFolderPath('Desktop')",
-        "if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE 'Desktop' }",
-        "if (-not (Test-Path -LiteralPath $desktop)) { New-Item -ItemType Directory -Path $desktop | Out-Null }",
-        f"$path = Join-Path $desktop {_ps_quote(SHORTCUT_NAME + '.lnk')}",
-        "$shell = New-Object -ComObject WScript.Shell",
-        "$s = $shell.CreateShortcut($path)",
-        f"$s.TargetPath = {_ps_quote(target)}",
-        f"$s.Arguments = {_ps_quote(arguments)}",
-        f"$s.WorkingDirectory = {_ps_quote(str(workdir))}",
-        f"$s.IconLocation = {_ps_quote(icon)}",
-        f"$s.Description = {_ps_quote(APP_TITLE + '（ターミナル版）')}",
-        "$s.Save()",
-        "if (-not (Test-Path -LiteralPath $path)) { throw \"shortcut was not saved: $path\" }",
-        "Write-Output $path",
+        "try {",
+        "  $desktop = [Environment]::GetFolderPath('Desktop')",
+        "  if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE 'Desktop' }",
+        "  if (-not (Test-Path -LiteralPath $desktop)) { New-Item -ItemType Directory -Path $desktop | Out-Null }",
+        f"  $path = Join-Path $desktop {_ps_quote(SHORTCUT_NAME + '.lnk')}",
+        f"  $target = {values[0]}; $arguments = {values[1]}; $workdir = {values[2]}; $icon = {values[3]}",
+        "  try {",
+        "    Add-Type -TypeDefinition @'",
+        _SHELL_LINK_CS.strip("\n"),
+        "'@",
+        f"    [SalesMailerShortcut.Creator]::Create($path, $target, $arguments, $workdir, $icon, {int(icon_index)},"
+        f" {_ps_quote(description)})",
+        "  } catch {",
+        "    # 予備: WScript.Shell で英数字の名前で保存してから日本語の名前に変更する",
+        "    $tmp = Join-Path $desktop 'SalesMailer-shortcut.lnk'",
+        "    $s = (New-Object -ComObject WScript.Shell).CreateShortcut($tmp)",
+        "    $s.TargetPath = $target; $s.Arguments = $arguments; $s.WorkingDirectory = $workdir",
+        f"    $s.IconLocation = \"$icon,{int(icon_index)}\"; $s.Save()",
+        "    Move-Item -LiteralPath $tmp -Destination $path -Force",
+        "  }",
+        "  if (-not (Test-Path -LiteralPath $path)) { throw \"shortcut was not saved: $path\" }",
+        "  Write-Output $path",
+        "} catch {",
+        "  Write-Output ('ERROR: ' + $_.Exception.Message)",
+        "  exit 1",
+        "}",
     ])
 
 
@@ -164,11 +232,11 @@ def create_desktop_shortcut() -> Path:
     target, args, workdir = launch_command()
     if sys.platform == "win32":
         if is_frozen():
-            icon = f"{target},0"  # exe に埋め込んだアイコン
+            icon = target  # exe に埋め込んだアイコン
         else:
             copied = _copy_icon("icon.ico")
-            icon = f"{copied},0" if copied else f"{target},0"
-        return Path(_powershell(windows_script(target, args, workdir, icon)))
+            icon = str(copied) if copied else target
+        return Path(_powershell(windows_script(target, args, workdir, icon, 0)))
 
     desktop = desktop_dir()
     desktop.mkdir(parents=True, exist_ok=True)

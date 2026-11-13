@@ -27,10 +27,26 @@ def test_icon_assets_exist():
 
 def test_windows_script_quotes_values():
     script = shortcut.windows_script(r"C:\Users\O'Brien\SalesMailer.exe", [], Path(r"C:\Users\O'Brien"),
-                                     r"C:\Users\O'Brien\SalesMailer.exe,0")
-    assert "$s.TargetPath = 'C:\\Users\\O''Brien\\SalesMailer.exe'" in script
+                                     r"C:\Users\O'Brien\SalesMailer.exe", 0)
+    assert "$target = 'C:\\Users\\O''Brien\\SalesMailer.exe'" in script
     assert "営業メール自動化.lnk" in script
     assert "GetFolderPath('Desktop')" in script  # OneDrive に移動したデスクトップにも対応
+    # 日本語のファイル名を扱えるショートカット API（IShellLinkW）を使い、失敗時は予備の方法に切り替える
+    assert "IShellLinkW" in script and "WScript.Shell" in script
+    # here-string の開始・終了は行頭に置く必要がある
+    lines = script.splitlines()
+    assert lines.count("'@") == 1 and any(line.endswith("@'") for line in lines)
+
+
+def test_powershell_error_is_reported(monkeypatch):
+    class Result:
+        returncode = 1
+        stdout = "ERROR: Unable to save shortcut\r\n".encode()
+        stderr = b"#< CLIXML noise"
+
+    monkeypatch.setattr(shortcut.subprocess, "run", lambda *a, **k: Result())
+    with pytest.raises(OSError, match="Unable to save shortcut"):
+        shortcut._powershell("x")
 
 
 def test_mac_command_file():

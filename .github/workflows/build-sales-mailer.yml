@@ -63,13 +63,14 @@ jobs:
           $desktop = [Environment]::GetFolderPath('Desktop')
           Write-Output "Desktop: $desktop"
           Get-ChildItem -Force -LiteralPath $desktop | ForEach-Object { Write-Output ("  {0} ({1} bytes)" -f $_.Name, $_.Length) }
-          $shell = New-Object -ComObject WScript.Shell
-          $targets = @(Get-ChildItem -LiteralPath $desktop -Filter *.lnk | ForEach-Object {
-            $t = $shell.CreateShortcut($_.FullName).TargetPath
-            Write-Output ("  {0} -> {1}" -f $_.Name, $t) | Out-Host
-            $t
-          })
-          if (-not ($targets | Where-Object { $_ -like '*SalesMailer.exe' })) { throw "SalesMailer shortcut not found on Desktop" }
+          $lnk = Join-Path $desktop '営業メール自動化.lnk'
+          if (-not (Test-Path -LiteralPath $lnk)) { throw "shortcut with the Japanese name was not created" }
+          # WScript.Shell は日本語のパスを読めないため、英数字名の一時ファイルにコピーしてリンク先を確認する
+          $copy = Join-Path $env:RUNNER_TEMP 'check.lnk'
+          Copy-Item -LiteralPath $lnk -Destination $copy -Force
+          $target = (New-Object -ComObject WScript.Shell).CreateShortcut($copy).TargetPath
+          Write-Output "shortcut -> $target"
+          if ($target -notlike '*SalesMailer.exe') { throw "unexpected shortcut target: $target" }
 
       - name: Self-test and desktop icon (macOS)
         if: runner.os == 'macOS'
