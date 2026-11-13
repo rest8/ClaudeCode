@@ -60,11 +60,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "self-test failed" }
           .\dist\SalesMailer.exe --install-shortcut
           if ($LASTEXITCODE -ne 0) { throw "install-shortcut failed" }
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          Write-Output "Desktop: $desktop"
+          Get-ChildItem -Force -LiteralPath $desktop | ForEach-Object { Write-Output ("  {0} ({1} bytes)" -f $_.Name, $_.Length) }
           $shell = New-Object -ComObject WScript.Shell
-          $found = Get-ChildItem ([Environment]::GetFolderPath('Desktop')) -Filter *.lnk |
-            Where-Object { $shell.CreateShortcut($_.FullName).TargetPath.EndsWith('SalesMailer.exe') }
-          if (-not $found) { throw "SalesMailer shortcut not found on Desktop" }
-          Write-Output "shortcut: $($found.FullName) -> $($shell.CreateShortcut($found.FullName).TargetPath)"
+          $targets = @(Get-ChildItem -LiteralPath $desktop -Filter *.lnk | ForEach-Object {
+            $t = $shell.CreateShortcut($_.FullName).TargetPath
+            Write-Output ("  {0} -> {1}" -f $_.Name, $t) | Out-Host
+            $t
+          })
+          if (-not ($targets | Where-Object { $_ -like '*SalesMailer.exe' })) { throw "SalesMailer shortcut not found on Desktop" }
 
       - name: Self-test and desktop icon (macOS)
         if: runner.os == 'macOS'

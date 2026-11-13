@@ -77,7 +77,8 @@ def _powershell(script: str) -> str:
         capture_output=True, timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if result.returncode != 0:
-        raise OSError(result.stderr.decode("utf-8", "replace") or "PowerShell の実行に失敗しました")
+        detail = result.stderr.decode("utf-8", "replace").strip() or result.stdout.decode("utf-8", "replace").strip()
+        raise OSError(detail or "PowerShell の実行に失敗しました")
     return result.stdout.decode("utf-8", "replace").strip()
 
 
@@ -88,8 +89,11 @@ def _ps_quote(value: str) -> str:
 def windows_script(target: str, args: list[str], workdir: Path, icon: str) -> str:
     arguments = " ".join(f'"{a}"' for a in args)
     return "\n".join([
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+        "$ErrorActionPreference = 'Stop'",  # 途中で失敗したら終了コードで分かるようにする
+        "try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}",
         "$desktop = [Environment]::GetFolderPath('Desktop')",
+        "if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE 'Desktop' }",
+        "if (-not (Test-Path -LiteralPath $desktop)) { New-Item -ItemType Directory -Path $desktop | Out-Null }",
         f"$path = Join-Path $desktop {_ps_quote(SHORTCUT_NAME + '.lnk')}",
         "$shell = New-Object -ComObject WScript.Shell",
         "$s = $shell.CreateShortcut($path)",
@@ -99,6 +103,7 @@ def windows_script(target: str, args: list[str], workdir: Path, icon: str) -> st
         f"$s.IconLocation = {_ps_quote(icon)}",
         f"$s.Description = {_ps_quote(APP_TITLE + '（ターミナル版）')}",
         "$s.Save()",
+        "if (-not (Test-Path -LiteralPath $path)) { throw \"shortcut was not saved: $path\" }",
         "Write-Output $path",
     ])
 
