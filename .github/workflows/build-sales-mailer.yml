@@ -18,6 +18,12 @@ defaults:
   run:
     working-directory: sales_mail_app
 
+env:
+  PYI_ARGS: >-
+    --noconfirm --onefile --console --name SalesMailer
+    --icon assets/icon.ico --add-data assets:assets
+    --collect-submodules anthropic --collect-submodules textual --collect-data textual --collect-submodules rich
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -42,23 +48,33 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements-dev.txt
+      - name: Build (PyInstaller)
+        shell: bash
+        run: pyinstaller $PYI_ARGS run_app.py
 
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        run: pyinstaller --noconfirm --onefile --windowed --name SalesMailer --collect-submodules anthropic run_app.py
-      - name: Self-test (Windows)
+      - name: Self-test and desktop icon (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath dist\SalesMailer.exe -ArgumentList '--self-test' -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "self-test failed: $($p.ExitCode)" }
+          .\dist\SalesMailer.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "self-test failed" }
+          .\dist\SalesMailer.exe --install-shortcut
+          if ($LASTEXITCODE -ne 0) { throw "install-shortcut failed" }
+          $shell = New-Object -ComObject WScript.Shell
+          $found = Get-ChildItem ([Environment]::GetFolderPath('Desktop')) -Filter *.lnk |
+            Where-Object { $shell.CreateShortcut($_.FullName).TargetPath.EndsWith('SalesMailer.exe') }
+          if (-not $found) { throw "SalesMailer shortcut not found on Desktop" }
+          Write-Output "shortcut: $($found.FullName) -> $($shell.CreateShortcut($found.FullName).TargetPath)"
 
-      - name: Build (macOS)
+      - name: Self-test and desktop icon (macOS)
         if: runner.os == 'macOS'
         run: |
-          pyinstaller --noconfirm --windowed --name SalesMailer --collect-submodules anthropic run_app.py
-          dist/SalesMailer.app/Contents/MacOS/SalesMailer --self-test
-          ditto -c -k --keepParent dist/SalesMailer.app dist/SalesMailer-macOS.zip
+          ./dist/SalesMailer --self-test
+          mkdir -p ~/Desktop
+          ./dist/SalesMailer --install-shortcut
+          test -x ~/Desktop/営業メール自動化.command
+          cat ~/Desktop/営業メール自動化.command
+          cd dist && ditto -c -k --keepParent SalesMailer SalesMailer-macOS.zip
 
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'

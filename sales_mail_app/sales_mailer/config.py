@@ -69,6 +69,9 @@ class Settings:
     crawl_max_pages: int = 5
     crawl_timeout_sec: int = 10
 
+    # --- その他 ---
+    shortcut_prompted: bool = False  # 初回起動時に「デスクトップにアイコンを作成」を確認済みか
+
     @property
     def effective_from_email(self) -> str:
         return self.from_email or self.smtp_user

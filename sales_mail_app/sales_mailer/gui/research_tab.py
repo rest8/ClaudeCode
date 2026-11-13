@@ -7,28 +7,14 @@ import tkinter as tk
 import webbrowser
 from tkinter import messagebox, ttk
 
-from ..db import STATUS_LABELS
-from ..research import (
-    EmailCrawler, Prospect, ResearchError, build_queries, enrich_emails, run_places_research,
-)
+from ..research import Prospect, build_queries
+from ..services import METHOD_CLAUDE, METHOD_GOOGLE, add_prospects, judge_label, mark_existing, run_research
 from .widgets import DataTable, LogBox, RegionSelector, split_list
 
 COLUMNS = [
     ("judge", "判定", 150), ("name", "会社名", 220), ("email", "メールアドレス", 210), ("prefecture", "都道府県", 80),
     ("city", "市区町村", 100), ("industry", "業種", 120), ("phone", "電話番号", 120), ("website", "Webサイト", 220),
 ]
-
-METHOD_GOOGLE = "google"
-METHOD_CLAUDE = "claude"
-
-
-def judge_label(p: Prospect) -> str:
-    if p.existing_status == "added":
-        return "✓ リストに追加済み"
-    if p.existing_status:
-        return f"登録済み（{STATUS_LABELS.get(p.existing_status, p.existing_status)}）"
-    return "新規" if p.email else "新規（メール未取得）"
-
 
 class ResearchTab(ttk.Frame):
     def __init__(self, master, app):
@@ -122,11 +108,8 @@ class ResearchTab(ttk.Frame):
             webbrowser.open(rows[0].website)
 
     def _mark_existing(self, prospects: list[Prospect]) -> None:
-        db = self.app.db
         for p in prospects:
-            dup = db.find_duplicate(p.name, p.email, p.website, p.place_id, p.prefecture)
-            if dup:
-                p.existing_status, p.existing_id = dup["status"], dup["id"]
+            mark_existing(self.app.db, p)
 
     # ---------------------------------------------------------------- 実行
     def start(self) -> None:
@@ -169,37 +152,15 @@ class ResearchTab(ttk.Frame):
             self.app.call_in_ui(self.log.append, text)
 
         def work():
-            if method == METHOD_GOOGLE:
-                prospects = run_places_research(settings.google_api_key, keywords, prefs, cities, max_per_query,
-                                                restrict, progress, self.stop_event)
-            else:
-                from ..ai import research_with_claude
-
-                def exclude_names(pref: str) -> list[str]:
-                    rows = self.app.db.list_companies(status_filter="all", prefectures=[pref] if pref else None,
-                                                      limit=150)
-                    return [r["name"] for r in rows]
-
-                prospects = research_with_claude(settings.anthropic_api_key, settings.ai_model, queries,
-                                                 max_per_query, exclude_names, progress, self.stop_event)
-                if restrict and prefs:
-                    prospects = [p for p in prospects if not p.prefecture or p.prefecture in prefs]
-            self._mark_existing(prospects)
-            self.app.call_in_ui(self._show_results, prospects)
-            if crawl and not self.stop_event.is_set():
-                crawler = EmailCrawler(settings.crawl_max_pages, settings.crawl_timeout_sec)
-
-                def on_found(p: Prospect) -> None:
-                    dup = self.app.db.find_duplicate(p.name, p.email, p.website, p.place_id, p.prefecture)
-                    if dup:
-                        p.existing_status, p.existing_id = dup["status"], dup["id"]
-                    self.app.call_in_ui(self._render)
-
-                enrich_emails(prospects, crawler, progress, self.stop_event, on_found)
-            return prospects
+            return run_research(
+                self.app.db, settings, method, keywords, prefs, cities, max_per_query, restrict, crawl,
+                progress, self.stop_event,
+                on_results=lambda ps: self.app.call_in_ui(self._show_results, ps),
+                on_update=lambda _p: self.app.call_in_ui(self._render),
+            )
 
         def done(prospects) -> None:
-            self._finish("調査を停止しました" if self.stop_event.is_set() else "調査が完了しました")
+            self._finish("")
             self._render()
 
         def error(e: Exception) -> None:
@@ -211,12 +172,12 @@ class ResearchTab(ttk.Frame):
     def _show_results(self, prospects: list[Prospect]) -> None:
         self.prospects = prospects
         self._render()
-        self.log.append(f"{len(prospects)} 件見つかりました。")
 
     def _finish(self, message: str) -> None:
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
-        self.log.append(message)
+        if message:
+            self.log.append(message)
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -234,28 +195,7 @@ class ResearchTab(ttk.Frame):
         if not selected:
             messagebox.showinfo("追加", "追加する企業を選択してください", parent=self)
             return
-        db = self.app.db
-        added = skipped_existing = skipped_no_mail = 0
-        for p in selected:
-            if p.existing_status:
-                skipped_existing += 1
-                continue
-            if not p.email and not self.include_no_email.get():
-                skipped_no_mail += 1
-                continue
-            dup = db.find_duplicate(p.name, p.email, p.website, p.place_id, p.prefecture)
-            if dup:
-                p.existing_status, p.existing_id = dup["status"], dup["id"]
-                skipped_existing += 1
-                continue
-            p.existing_id = db.add_company(p.to_company())
-            p.existing_status = "added"
-            added += 1
+        result = add_prospects(self.app.db, selected, self.include_no_email.get())
         self._render()
         self.app.data_changed()
-        messagebox.showinfo(
-            "追加",
-            f"リストに追加: {added} 件\n登録済みのためスキップ: {skipped_existing} 件\n"
-            f"メール未取得のためスキップ: {skipped_no_mail} 件",
-            parent=self,
-        )
+        messagebox.showinfo("追加", result.text().replace(" / ", "\n"), parent=self)
