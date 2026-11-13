@@ -1,0 +1,2 @@
+# 実行に必要なライブラリ（GUI の Tkinter は Python 標準添付）
+anthropic>=2.8,<3

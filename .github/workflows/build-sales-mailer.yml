@@ -1,0 +1,72 @@
+name: Build Sales Mailer desktop app
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "sales_mail_app/**"
+      - ".github/workflows/build-sales-mailer.yml"
+  pull_request:
+    paths:
+      - "sales_mail_app/**"
+      - ".github/workflows/build-sales-mailer.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: sales_mail_app
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: pyinstaller --noconfirm --onefile --windowed --name SalesMailer --collect-submodules anthropic run_app.py
+      - name: Self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\SalesMailer.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "self-test failed: $($p.ExitCode)" }
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --windowed --name SalesMailer --collect-submodules anthropic run_app.py
+          dist/SalesMailer.app/Contents/MacOS/SalesMailer --self-test
+          ditto -c -k --keepParent dist/SalesMailer.app dist/SalesMailer-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: SalesMailer-Windows
+          path: sales_mail_app/dist/SalesMailer.exe
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: SalesMailer-macOS
+          path: sales_mail_app/dist/SalesMailer-macOS.zip
