@@ -29,23 +29,38 @@ Windows / macOS / Linux 向けアプリです。**デスクトップのアイコ
 
 ## インストールとデスクトップアイコン
 
-### 実行ファイルをダウンロードする（おすすめ）
+### Mac で使う（おすすめ）
 
-1. GitHub の **Actions → 「Build Sales Mailer desktop app」** の最新の実行結果ページ下部「Artifacts」から
-   `SalesMailer-Windows`（`SalesMailer.exe`）または `SalesMailer-macOS`（`SalesMailer` の zip）をダウンロードします。
-2. 実行ファイルを置き場所（例: `ドキュメント\SalesMailer\`）に移してからダブルクリックします。
-   ターミナルが開いてアプリが起動し、**「デスクトップにアイコンを作成しますか？」** と聞かれるので「作成する」を選びます。
+1. **ダウンロード** – GitHub の **Actions → 「Build Sales Mailer desktop app」** で、緑のチェックが付いた最新の実行結果を開き、
+   ページ下部「Artifacts」の **`SalesMailer-macOS`** をクリックします（GitHub へのログインが必要）。
+   ダウンロードした zip を開くと `SalesMailer-macOS.dmg` が出てきます。
+2. **インストール** – `SalesMailer-macOS.dmg` をダブルクリックし、開いたウィンドウの **`SalesMailer` を `Applications` へドラッグ**します。
+   同じウィンドウの「はじめにお読みください.txt」にも手順があります。
+3. **初回だけの許可** – 「アプリケーション」フォルダの `SalesMailer` をダブルクリック →「“SalesMailer”は開けません」で「完了」→
+   アップルメニュー →「システム設定」→「プライバシーとセキュリティ」の下の方にある **「このまま開く」** をクリック（パスワード入力）→
+   もう一度 `SalesMailer` をダブルクリックして「開く」。**ターミナルが開いてアプリが起動します。**
+4. **デスクトップにアイコン** – 「デスクトップにアイコンを作成しますか？」で「作成する」。
+   「“ターミナル”から“デスクトップ”フォルダ内のファイルにアクセスしようとしています」と出たら「許可」。
+   デスクトップの **「営業メール自動化」** をダブルクリックすると、次回からはすぐ起動します。
+
+- タブはマウスでクリックして切り替えます（キーボードでは `fn` + `F1`〜`F7`）。終了は `control` + `Q`。
+- Apple シリコン（M1 以降）の Mac 用です。Intel の Mac では動きません。
+- 「このまま開く」が表示されない場合は、ターミナルで `xattr -dr com.apple.quarantine /Applications/SalesMailer` を実行してから開いてください。
+
+### Windows で使う
+
+1. 同じ Artifacts から **`SalesMailer-Windows`** をダウンロードし、zip から `SalesMailer.exe` を取り出して置き場所（例: `ドキュメント\SalesMailer\`）に移します。
+2. ダブルクリックするとターミナルが開いて起動し、**「デスクトップにアイコンを作成しますか？」** と聞かれるので「作成する」を選びます。
+   SmartScreen の警告が出たら「詳細情報」→「実行」を選びます（署名なしのアプリのため）。
 3. 次回からはデスクトップの **「営業メール自動化」** アイコンをダブルクリックするだけで起動します。
 
 | OS | 作られるアイコン | クリックすると |
 | --- | --- | --- |
-| Windows | `営業メール自動化.lnk`（ショートカット） | Windows ターミナル（またはコマンドプロンプト）が開いて起動 |
 | macOS | `営業メール自動化.command` | ターミナル.app が開いて起動 |
+| Windows | `営業メール自動化.lnk`（ショートカット） | Windows ターミナル（またはコマンドプロンプト）が開いて起動 |
 | Linux | `sales-mailer.desktop`（アプリ一覧にも登録） | 端末が開いて起動 |
 
-- 実行ファイルを別の場所に移した場合は、設定タブの「デスクトップにアイコンを作成」でアイコンを作り直してください。
-- Windows: 初回起動時に SmartScreen の警告が出たら「詳細情報」→「実行」を選びます（署名なしのアプリのため）。
-- macOS: 初回だけ `SalesMailer` を右クリック→「開く」で起動します（開発元未確認の警告を回避）。
+実行ファイルを別の場所に移した場合は、設定タブの「デスクトップにアイコンを作成」でアイコンを作り直してください。
 
 ### ソースから使う
 
@@ -63,7 +78,7 @@ python run_app.py --install-shortcut
 ### 自分で実行ファイルを作る
 
 - Windows: `build_windows.bat` をダブルクリック → `dist\SalesMailer.exe`
-- macOS: `./build_mac.sh` → `dist/SalesMailer`
+- macOS: `./build_mac.sh` → `dist/SalesMailer`（Mac 版の配布用ディスクイメージは CI で作成）
 
 ## ターミナル画面の操作
 

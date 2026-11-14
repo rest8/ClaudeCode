@@ -114,6 +114,8 @@ class SalesMailerTUI(App):
 
     @work
     async def first_run(self) -> None:
+        if sys.platform == "darwin":  # Mac の F1〜F7 は既定で画面の明るさなどに割り当てられている
+            self.notify("タブはマウスでクリックして切り替えられます（キーボードでは fn + F1〜F7）。", timeout=12)
         if not self.settings.smtp_user:
             self.action_show_tab("settings")
             self.notify("はじめに、メール送信（SMTP）と送信者情報を設定してください。", timeout=10)
@@ -137,7 +139,11 @@ class SalesMailerTUI(App):
         try:
             path = create_desktop_shortcut()
         except Exception as e:  # noqa: BLE001
-            self.push_screen(MessageDialog(f"アイコンを作成できませんでした:\n{e}", "デスクトップアイコン"))
+            message = f"アイコンを作成できませんでした:\n{e}"
+            if sys.platform == "darwin" and isinstance(e, PermissionError):
+                message += ("\n\nMac の「システム設定」→「プライバシーとセキュリティ」→「ファイルとフォルダ」→"
+                            "「ターミナル」で「デスクトップフォルダ」をオンにしてから、もう一度お試しください。")
+            self.push_screen(MessageDialog(message, "デスクトップアイコン"))
             return
         self.push_screen(MessageDialog(f"デスクトップにアイコンを作成しました。\n{path}\n\n"
                                        "次回からはこのアイコンをダブルクリックすると、ターミナルでこの画面が開きます。",

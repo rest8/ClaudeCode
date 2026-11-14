@@ -72,7 +72,7 @@ jobs:
           Write-Output "shortcut -> $target"
           if ($target -notlike '*SalesMailer.exe') { throw "unexpected shortcut target: $target" }
 
-      - name: Self-test and desktop icon (macOS)
+      - name: Self-test, desktop icon and installer disk image (macOS)
         if: runner.os == 'macOS'
         run: |
           ./dist/SalesMailer --self-test
@@ -80,7 +80,16 @@ jobs:
           ./dist/SalesMailer --install-shortcut
           test -x ~/Desktop/営業メール自動化.command
           cat ~/Desktop/営業メール自動化.command
-          cd dist && ditto -c -k --keepParent SalesMailer SalesMailer-macOS.zip
+          # ダブルクリックで開き、SalesMailer を「Applications」へドラッグするだけでインストールできるディスクイメージ
+          mkdir -p dmg
+          cp dist/SalesMailer dmg/
+          cp packaging/mac/はじめにお読みください.txt dmg/
+          ln -s /Applications dmg/Applications
+          for i in 1 2 3; do
+            hdiutil create -volname "営業メール自動化" -srcfolder dmg -ov -format UDZO dist/SalesMailer-macOS.dmg && break
+            sleep 5
+          done
+          test -f dist/SalesMailer-macOS.dmg
 
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
@@ -91,4 +100,4 @@ jobs:
         if: runner.os == 'macOS'
         with:
           name: SalesMailer-macOS
-          path: sales_mail_app/dist/SalesMailer-macOS.zip
+          path: sales_mail_app/dist/SalesMailer-macOS.dmg
