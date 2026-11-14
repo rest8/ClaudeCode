@@ -7,7 +7,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .config import Settings
+from .config import Settings, is_demo
 from .db import (
     KIND_FOLLOW, KIND_NEW, RESULT_DRY_RUN, RESULT_FAILED, RESULT_SENT, STATUS_ERROR, Database,
 )
@@ -68,6 +68,9 @@ def run_send_job(
     """
     report = SendReport()
     total = len(companies)
+    if is_demo():  # テスト環境では、画面の設定にかかわらず実際には送信しない
+        opts.dry_run = True
+        sender = None
     if sender is None:
         sender = DryRunSender() if opts.dry_run else SmtpSender(settings)
     try:
@@ -144,6 +147,8 @@ def run_send_job(
 def send_test_mail(settings: Settings, template: dict, company: dict, use_ai: bool = False,
                    thread_reply: bool = False, kind: str = KIND_NEW) -> str:
     """選択中の企業向け文面を、自分のアドレス宛てにテスト送信する."""
+    if is_demo():
+        raise ValueError("テスト環境では実際のメールは送信しません（本番の画面で「自分宛テスト」をお使いください）")
     to = settings.effective_from_email
     if not to:
         raise ValueError("送信元メールアドレスが設定されていません")

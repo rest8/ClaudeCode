@@ -14,7 +14,7 @@ from textual.binding import Binding
 from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
 from .. import APP_TITLE, __version__
-from ..config import Settings, data_dir, load_settings, save_settings
+from ..config import Settings, data_dir, is_demo, load_settings, save_settings
 from ..db import Database
 from ..services import stats_text
 from .dialogs import DIALOG_CSS, ConfirmDialog, MessageDialog
@@ -90,8 +90,17 @@ class SalesMailerTUI(App):
     def __init__(self, db_path: str | Path | None = None, first_run_prompts: bool = True,
                  initial_tab: str | None = None):
         super().__init__()
+        if is_demo():
+            from ..config import settings_path
+            from ..demo import demo_settings, ensure_seeded
+
+            if not settings_path().exists():
+                save_settings(demo_settings())
+            self.sub_title = "テスト環境（サンプルデータ・メールは実際には送信されません）"
         self.settings: Settings = load_settings()
         self.db = Database(db_path or data_dir() / "sales_mailer.db")
+        if is_demo():
+            ensure_seeded(self.db)
         self.first_run_prompts = first_run_prompts
         self.initial_tab = initial_tab
 
@@ -114,6 +123,10 @@ class SalesMailerTUI(App):
 
     @work
     async def first_run(self) -> None:
+        if is_demo():
+            self.notify("テスト環境です。架空の企業データで全機能を試せます。メールは実際には送信されず、"
+                        "企業調査も API を使わないため費用はかかりません。", timeout=15)
+            return
         if sys.platform == "darwin":  # Mac の F1〜F7 は既定で画面の明るさなどに割り当てられている
             self.notify("タブはマウスでクリックして切り替えられます（キーボードでは fn + F1〜F7）。", timeout=12)
         if not self.settings.smtp_user:
@@ -137,7 +150,7 @@ class SalesMailerTUI(App):
         from ..shortcut import create_desktop_shortcut
 
         try:
-            path = create_desktop_shortcut()
+            path = create_desktop_shortcut(demo=is_demo())
         except Exception as e:  # noqa: BLE001
             message = f"アイコンを作成できませんでした:\n{e}"
             if sys.platform == "darwin" and isinstance(e, PermissionError):

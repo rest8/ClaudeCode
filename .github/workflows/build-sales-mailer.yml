@@ -71,6 +71,15 @@ jobs:
           $target = (New-Object -ComObject WScript.Shell).CreateShortcut($copy).TargetPath
           Write-Output "shortcut -> $target"
           if ($target -notlike '*SalesMailer.exe') { throw "unexpected shortcut target: $target" }
+          # テスト環境のアイコン（--demo 付き）
+          .\dist\SalesMailer.exe --demo --install-shortcut
+          if ($LASTEXITCODE -ne 0) { throw "install-shortcut (test environment) failed" }
+          $demo = Join-Path $desktop '営業メール自動化（テスト環境）.lnk'
+          if (-not (Test-Path -LiteralPath $demo)) { throw "test environment shortcut was not created" }
+          Copy-Item -LiteralPath $demo -Destination $copy -Force
+          $args2 = (New-Object -ComObject WScript.Shell).CreateShortcut($copy).Arguments
+          Write-Output "test environment shortcut arguments: $args2"
+          if ($args2 -notlike '*--demo*') { throw "unexpected arguments: $args2" }
 
       - name: Self-test, desktop icon and installer disk image (macOS)
         if: runner.os == 'macOS'
@@ -80,6 +89,8 @@ jobs:
           ./dist/SalesMailer --install-shortcut
           test -x ~/Desktop/営業メール自動化.command
           cat ~/Desktop/営業メール自動化.command
+          ./dist/SalesMailer --demo --install-shortcut
+          grep -q -- '--demo' ~/Desktop/営業メール自動化（テスト環境）.command
           # ダブルクリックで開き、SalesMailer を「Applications」へドラッグするだけでインストールできるディスクイメージ
           mkdir -p dmg
           cp dist/SalesMailer dmg/

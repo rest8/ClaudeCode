@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass
 from typing import Callable
 
-from .config import Settings
+from .config import Settings, is_demo
 from .db import (
     STATUS_CONTRACTED, STATUS_ERROR, STATUS_LABELS, STATUS_NEW, STATUS_OPTED_OUT, STATUS_REPLIED, STATUS_SENT,
     Database,
@@ -54,6 +54,18 @@ def run_research(
         raise ResearchError("調査する都道府県を選ぶか、市区町村を入力してください")
     if not keywords:
         raise ResearchError("業種・キーワードを入力してください（例: 製造業）")
+    if is_demo():
+        from . import demo
+
+        progress("テスト環境のため、API を使わずにサンプルの調査結果を表示します（費用はかかりません）")
+        prospects = demo.sample_prospects(db, keywords, prefectures, cities, min(max_per_query, 8))
+        for p in prospects:
+            mark_existing(db, p)
+        progress(f"{len(prospects)} 件見つかりました（登録済み {sum(1 for p in prospects if p.existing_status)} 件）")
+        if on_results:
+            on_results(prospects)
+        progress("調査が完了しました")
+        return prospects
     if method == METHOD_GOOGLE:
         prospects = run_places_research(settings.google_api_key, keywords, prefectures, cities, max_per_query,
                                         restrict_to_region, progress, stop)
@@ -119,7 +131,8 @@ def add_prospects(db: Database, prospects: list[Prospect], include_no_email: boo
 
 def stats_text(db: Database, settings: Settings) -> str:
     s = db.stats()
-    return (f"未送付 {s[STATUS_NEW]}  送付済み {s[STATUS_SENT]}  返信あり {s[STATUS_REPLIED]}  "
+    prefix = "【テスト環境・送信なし】 " if is_demo() else ""
+    return (f"{prefix}未送付 {s[STATUS_NEW]}  送付済み {s[STATUS_SENT]}  返信あり {s[STATUS_REPLIED]}  "
             f"契約済み {s[STATUS_CONTRACTED]}  配信停止 {s[STATUS_OPTED_OUT]}  エラー {s[STATUS_ERROR]}  │  "
             f"本日の送信 {s['today']}/{settings.daily_limit}通")
 

@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from . import APP_TITLE
-from .config import data_dir
+from .config import base_data_dir, data_dir
 
 SHORTCUT_NAME = APP_TITLE
 
@@ -139,9 +139,10 @@ def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def windows_script(target: str, args: list[str], workdir: Path, icon_path: str, icon_index: int = 0) -> str:
+def windows_script(target: str, args: list[str], workdir: Path, icon_path: str, icon_index: int = 0,
+                   name: str = SHORTCUT_NAME) -> str:
     arguments = " ".join(f'"{a}"' for a in args)
-    description = APP_TITLE + "（ターミナル版）"
+    description = name + "（ターミナル版）"
     values = [_ps_quote(v) for v in (target, arguments, str(workdir), icon_path)]
     return "\n".join([
         "$ErrorActionPreference = 'Stop'",
@@ -151,7 +152,7 @@ def windows_script(target: str, args: list[str], workdir: Path, icon_path: str, 
         "  $desktop = [Environment]::GetFolderPath('Desktop')",
         "  if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE 'Desktop' }",
         "  if (-not (Test-Path -LiteralPath $desktop)) { New-Item -ItemType Directory -Path $desktop | Out-Null }",
-        f"  $path = Join-Path $desktop {_ps_quote(SHORTCUT_NAME + '.lnk')}",
+        f"  $path = Join-Path $desktop {_ps_quote(name + '.lnk')}",
         f"  $target = {values[0]}; $arguments = {values[1]}; $workdir = {values[2]}; $icon = {values[3]}",
         "  try {",
         "    Add-Type -TypeDefinition @'",
@@ -182,10 +183,10 @@ def mac_command_file(target: str, args: list[str], workdir: Path) -> str:
             f"cd {_sh_quote(str(workdir))}\nexec {quoted}\n")
 
 
-def linux_desktop_entry(target: str, args: list[str], workdir: Path, icon: Path) -> str:
+def linux_desktop_entry(target: str, args: list[str], workdir: Path, icon: Path, name: str = APP_TITLE) -> str:
     exec_line = " ".join(_desktop_quote(a) for a in [target, *args])
     return "\n".join([
-        "[Desktop Entry]", "Type=Application", f"Name={APP_TITLE}",
+        "[Desktop Entry]", "Type=Application", f"Name={name}",
         "Comment=営業メールの企業調査・送信・管理（ターミナル版）", f"Exec={exec_line}", f"Path={workdir}",
         f"Icon={icon}", "Terminal=true", "Categories=Office;", "",
     ])
@@ -211,37 +212,47 @@ def _copy_icon(name: str) -> Path | None:
     return dst
 
 
-def shortcut_path() -> Path:
+TEST_SUFFIX = "（テスト環境）"
+
+
+def shortcut_name(demo: bool = False) -> str:
+    return SHORTCUT_NAME + (TEST_SUFFIX if demo else "")
+
+
+def shortcut_path(demo: bool = False) -> Path:
     desktop = desktop_dir()
     if sys.platform == "win32":
-        return desktop / f"{SHORTCUT_NAME}.lnk"
+        return desktop / f"{shortcut_name(demo)}.lnk"
     if sys.platform == "darwin":
-        return desktop / f"{SHORTCUT_NAME}.command"
-    return desktop / "sales-mailer.desktop"
+        return desktop / f"{shortcut_name(demo)}.command"
+    return desktop / ("sales-mailer-test.desktop" if demo else "sales-mailer.desktop")
 
 
-def shortcut_exists() -> bool:
+def shortcut_exists(demo: bool = False) -> bool:
     try:
-        return shortcut_path().exists()
+        return shortcut_path(demo).exists()
     except OSError:
         return False
 
 
-def create_desktop_shortcut() -> Path:
-    """デスクトップにアイコンを作り、そのパスを返す."""
+def create_desktop_shortcut(demo: bool = False) -> Path:
+    """デスクトップにアイコンを作り、そのパスを返す。demo=True ならテスト環境を開くアイコン."""
     target, args, workdir = launch_command()
+    if demo:
+        args = [*args, "--demo"]
+    name = shortcut_name(demo)
     if sys.platform == "win32":
         if is_frozen():
             icon = target  # exe に埋め込んだアイコン
         else:
             copied = _copy_icon("icon.ico")
             icon = str(copied) if copied else target
-        return Path(_powershell(windows_script(target, args, workdir, icon, 0)))
+        return Path(_powershell(windows_script(target, args, workdir, icon, 0, name=name)))
 
     desktop = desktop_dir()
     desktop.mkdir(parents=True, exist_ok=True)
     if sys.platform == "darwin":
-        path = desktop / f"{SHORTCUT_NAME}.command"
+        path = desktop / f"{name}.command"
         path.write_text(mac_command_file(target, args, workdir), encoding="utf-8")
         path.chmod(0o755)
         icon = _copy_icon("icon.png")
@@ -254,12 +265,36 @@ def create_desktop_shortcut() -> Path:
         return path
 
     icon = _copy_icon("icon.png") or Path("mail-send")
-    entry = linux_desktop_entry(target, args, workdir, icon)
-    path = desktop / "sales-mailer.desktop"
-    for dest in (path, Path.home() / ".local" / "share" / "applications" / "sales-mailer.desktop"):
+    entry = linux_desktop_entry(target, args, workdir, icon, name=name)
+    filename = shortcut_path(demo).name
+    path = desktop / filename
+    for dest in (path, Path.home() / ".local" / "share" / "applications" / filename):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(entry, encoding="utf-8")
         dest.chmod(0o755)
     if shutil.which("gio"):  # GNOME で「起動を許可」済みにする
         subprocess.run(["gio", "set", str(path), "metadata::trusted", "true"], capture_output=True, timeout=10)
     return path
+
+
+def open_test_environment() -> None:
+    """テスト環境（--demo）を新しいターミナルのウィンドウで開く."""
+    target, args, workdir = launch_command()
+    command = [target, *args, "--demo"]
+    env = {k: v for k, v in os.environ.items() if k != "SALES_MAILER_DEMO"}
+    if sys.platform == "win32":
+        subprocess.Popen(command, cwd=str(workdir), env=env,
+                         creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10))
+        return
+    if sys.platform == "darwin":
+        script = base_data_dir() / "open-test-env.command"
+        script.write_text(mac_command_file(target, [*args, "--demo"], workdir), encoding="utf-8")
+        script.chmod(0o755)
+        subprocess.Popen(["open", str(script)])
+        return
+    for terminal in ("x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"):
+        if shutil.which(terminal):
+            prefix = [terminal, "--"] if terminal == "gnome-terminal" else [terminal, "-e"]
+            subprocess.Popen([*prefix, *command], cwd=str(workdir), env=env)
+            return
+    raise OSError("ターミナルが見つかりません。次のコマンドで開いてください: " + " ".join(command))

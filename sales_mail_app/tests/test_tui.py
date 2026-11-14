@@ -175,3 +175,50 @@ async def test_send_button_disabled_state_restored_after_dry_run(seeded):
         assert not pane.query_one("#send", Button).disabled
         assert pane.query_one("#stop", Button).disabled
         assert not pane.busy
+
+
+async def test_demo_mode_end_to_end(tmp_path, monkeypatch):
+    """テスト環境: サンプルデータ入り・常にテストモード・調査はサンプル結果・費用なし."""
+    from sales_mailer import config
+
+    monkeypatch.setenv("SALES_MAILER_HOME", str(tmp_path))
+    monkeypatch.setenv(config.DEMO_ENV, "1")
+    app = SalesMailerTUI(first_run_prompts=False, initial_tab="newmail")
+    async with app.run_test(size=SIZE) as pilot:
+        assert "テスト環境" in str(app.query_one("#stats").render())
+        pane = app.query_one("#pane-newmail")
+        dry = pane.query_one("#dry", Checkbox)
+        assert dry.value and dry.disabled  # 送信しない設定を外せない
+        await pilot.click(pane.query_one("#extract"))
+        assert len(pane.table.data) == 8
+        await pilot.click(pane.query_one("#send"))
+        await pilot.pause()
+        await pilot.press("enter")
+        await settle(app, pilot)
+        assert {r["result"] for r in app.db.list_send_log()[:8]} == {RESULT_DRY_RUN}
+        assert isinstance(app.screen, MessageDialog)  # 送信結果
+        await pilot.press("enter")
+
+        await pilot.press("f2")
+        await pilot.pause()
+        research = app.query_one("#pane-research")
+        research.query_one("#keywords", Input).value = "製造業"
+        research.query_one("#prefs").set_prefectures(["宮城県"])
+        await pilot.click(research.query_one("#start"))
+        await settle(app, pilot)
+        assert research.prospects and any(p.existing_status for p in research.prospects)
+
+        await pilot.press("f4")
+        await pilot.pause()
+        follow = app.query_one("#pane-follow")
+        await pilot.click(follow.query_one("#extract"))
+        before = len(follow.table.data)
+        await pilot.click(follow.query_one("#inbox"))
+        await pilot.pause()
+        assert isinstance(app.screen, MessageDialog)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(follow.table.data) == before - 1  # 返信ありになった企業はフォロー対象から外れる
+    # 本番のデータフォルダには何も作られていない
+    assert not (tmp_path / "sales_mailer.db").exists()
+    assert (tmp_path / "test-env" / "sales_mailer.db").exists()

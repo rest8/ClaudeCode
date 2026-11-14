@@ -17,7 +17,7 @@ from textual.widgets import (
 )
 
 from ..campaign import SendOptions, prepare_mail, run_send_job, send_test_mail
-from ..config import Settings, data_dir
+from ..config import Settings, data_dir, is_demo
 from ..csv_io import read_companies_csv, write_companies_csv, write_rows_csv
 from ..db import (
     KIND_FOLLOW, KIND_NEW, RESULT_DRY_RUN, RESULT_FAILED, RESULT_SENT, STATUS_CONTRACTED, STATUS_ERROR,
@@ -392,13 +392,14 @@ class ResearchPane(BasePane):
         if not keywords:
             self.notify("業種・キーワードを入力してください（例: 製造業）", severity="warning")
             return
-        if method == METHOD_GOOGLE and not self.settings.google_api_key:
-            self.notify("設定タブ（F7）で Google Places API キーを入力してください", severity="warning")
-            return
-        if method == METHOD_CLAUDE and not self.need_ai_key():
-            return
+        if not is_demo():  # テスト環境は API を使わずサンプル結果を表示する
+            if method == METHOD_GOOGLE and not self.settings.google_api_key:
+                self.notify("設定タブ（F7）で Google Places API キーを入力してください", severity="warning")
+                return
+            if method == METHOD_CLAUDE and not self.need_ai_key():
+                return
         searches = len(keywords) * max(1, len(cities) or len(prefs))
-        if searches > 20 and not await self.app.push_screen_wait(ConfirmDialog(
+        if searches > 20 and not is_demo() and not await self.app.push_screen_wait(ConfirmDialog(
                 f"{searches} 回の検索を行います（API利用料がかかります）。続けますか？")):
             return
         try:
@@ -505,7 +506,8 @@ class BaseSendPane(BasePane):
     def options(self) -> SendOptions:
         s = self.settings
         return SendOptions(kind=self.kind, template=self.current_template() or {},
-                           dry_run=self.query_one("#dry", Checkbox).value, use_ai=self.query_one("#ai", Checkbox).value,
+                           dry_run=is_demo() or self.query_one("#dry", Checkbox).value,
+                           use_ai=self.query_one("#ai", Checkbox).value,
                            interval_sec=s.send_interval_sec, daily_limit=s.daily_limit)
 
     @property
@@ -514,6 +516,10 @@ class BaseSendPane(BasePane):
 
     def on_mount(self) -> None:
         self.load_templates()
+        if is_demo():  # テスト環境では常にテストモード（送信しない）
+            dry = self.query_one("#dry", Checkbox)
+            dry.value = True
+            dry.disabled = True
 
     def on_show(self) -> None:
         self.load_templates()
@@ -617,6 +623,10 @@ class BaseSendPane(BasePane):
         template = self.current_template()
         settings = self.settings
         if not template:
+            return
+        if is_demo():
+            self.notify("テスト環境では実際のメールは送信しません。本番の画面で「自分宛テスト」をお使いください。",
+                        severity="warning", timeout=8)
             return
         if not settings.smtp_user:
             self.notify("設定タブ（F7）で SMTP（送信）設定を入力してください", severity="warning")
@@ -794,6 +804,18 @@ class FollowMailPane(BaseSendPane):
 
     def check_inbox(self) -> None:
         settings = self.settings
+        if is_demo():
+            from ..demo import simulate_inbox
+
+            result = simulate_inbox(self.db)
+            self.app.data_changed()
+            if self.table.row_count:
+                self.extract()
+            names = "、".join(result.replied) or "（送付済みの企業がありません）"
+            self.app.push_screen(MessageDialog(
+                "テスト環境のため、受信トレイの代わりに例として次の企業を「返信あり」にしました。\n"
+                f"{names}\n\n返信があった企業はフォローメールの対象から自動で外れます。", "返信チェック（テスト環境）"))
+            return
         if not settings.effective_imap_user:
             self.notify("設定タブ（F7）で IMAP（受信）設定を入力してください", severity="warning")
             return
@@ -1055,7 +1077,12 @@ class SettingsPane(BasePane):
             yield Button("設定を保存 (Ctrl+S)", id="save", variant="primary", compact=True)
             yield Button("SMTP接続テスト", id="smtp", compact=True)
             yield Button("IMAP接続テスト", id="imap", compact=True)
-            yield Button("デスクトップにアイコンを作成", id="shortcut", compact=True)
+            if is_demo():
+                yield Button("テスト環境のアイコンを作成", id="shortcut", compact=True)
+                yield Button("サンプルデータを初期状態に戻す", id="demo-reset", variant="warning", compact=True)
+            else:
+                yield Button("デスクトップにアイコンを作成", id="shortcut", compact=True)
+                yield Button("テスト環境を開く", id="demo-open", variant="success", compact=True)
         with VerticalScroll(classes="settings-scroll"):
             with Horizontal(classes="settings-cols"):
                 for column in (SETTINGS_SECTIONS[:3], SETTINGS_SECTIONS[3:]):
@@ -1139,6 +1166,32 @@ class SettingsPane(BasePane):
                         lambda e: self.app.push_screen(MessageDialog(f"接続に失敗しました:\n{e}", title)))
         elif bid == "shortcut":
             self.app.create_shortcut()
+        elif bid == "demo-open":
+            self.open_test_environment()
+        elif bid == "demo-reset":
+            self.reset_demo()
+
+    def open_test_environment(self) -> None:
+        from ..shortcut import open_test_environment
+
+        try:
+            open_test_environment()
+        except Exception as e:  # noqa: BLE001
+            self.app.push_screen(MessageDialog(f"テスト環境を開けませんでした:\n{e}", "テスト環境"))
+            return
+        self.notify("テスト環境を別のウィンドウで開きました（サンプルデータ・メールは送信されません）", timeout=8)
+
+    @work
+    async def reset_demo(self) -> None:
+        if not await self.app.push_screen_wait(ConfirmDialog(
+                "テスト環境の企業リストと送信履歴を、最初のサンプルの状態に戻しますか？\n（本番のデータには影響しません）",
+                "サンプルデータを戻す")):
+            return
+        from ..demo import reset
+
+        reset(self.db)
+        self.app.data_changed()
+        self.notify("サンプルデータを初期状態に戻しました")
 
 
 def default_export_dir() -> Path:

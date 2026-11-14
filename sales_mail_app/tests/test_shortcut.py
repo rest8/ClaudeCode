@@ -74,3 +74,22 @@ def test_create_desktop_shortcut_on_posix(monkeypatch, tmp_path):
     assert path.exists() and path.parent == desktop
     assert path.stat().st_mode & 0o111  # 実行可能（ダブルクリックで起動できる）
     assert shortcut.shortcut_exists()
+
+
+def test_demo_shortcut_name_and_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(shortcut, "desktop_dir", lambda: tmp_path)
+    assert shortcut.shortcut_name(demo=True) == "営業メール自動化（テスト環境）"
+    script = shortcut.windows_script("C:\\a\\SalesMailer.exe", ["--demo"], Path("C:\\a"), "C:\\a\\SalesMailer.exe", 0,
+                                     name=shortcut.shortcut_name(True))
+    assert "営業メール自動化（テスト環境）.lnk" in script and "$arguments = '\"--demo\"'" in script
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows は PowerShell でショートカットを作る")
+def test_create_demo_shortcut_on_posix(monkeypatch, tmp_path):
+    desktop = tmp_path / "Desktop"
+    monkeypatch.setattr(shortcut, "desktop_dir", lambda: desktop)
+    monkeypatch.setattr(shortcut.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(shortcut.shutil, "which", lambda name: None)
+    path = shortcut.create_desktop_shortcut(demo=True)
+    text = path.read_text(encoding="utf-8")
+    assert "--demo" in text and "（テスト環境）" in text

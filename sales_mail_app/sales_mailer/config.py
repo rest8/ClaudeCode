@@ -16,8 +16,25 @@ DEFAULT_OPTOUT_TEXT = (
 )
 
 
+DEMO_ENV = "SALES_MAILER_DEMO"
+
+
+def is_demo() -> bool:
+    """テスト環境（サンプルデータ・実際には送信しない）で動いているか."""
+    return os.environ.get(DEMO_ENV) == "1"
+
+
 def data_dir() -> Path:
-    """設定・データベースを保存するフォルダ（OSごとのユーザーデータ領域）."""
+    """設定・データベースを保存するフォルダ（OSごとのユーザーデータ領域）.
+
+    テスト環境では本番のデータと混ざらないよう、その中の test-env フォルダを使う。
+    """
+    path = base_data_dir() / "test-env" if is_demo() else base_data_dir()
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def base_data_dir() -> Path:
     override = os.environ.get("SALES_MAILER_HOME")
     if override:
         path = Path(override)

@@ -3,6 +3,7 @@
     python run_app.py                    ターミナル版（既定。デスクトップのアイコンから起動される画面）
     python run_app.py --tab follow       指定したタブで開く（companies/research/newmail/follow/
                                          templates/history/settings）
+    python run_app.py --demo             テスト環境（サンプルデータ・メールは実際には送信しない・費用なし）
     python run_app.py --gui              ウィンドウ版（Tkinter）
     python run_app.py --install-shortcut デスクトップにアイコンを作成
     python run_app.py --self-test        依存関係の読み込みだけ確認して終了（ビルド確認用）
@@ -31,9 +32,10 @@ def self_test() -> int:
 
 
 def install_shortcut() -> int:
+    from sales_mailer.config import is_demo
     from sales_mailer.shortcut import create_desktop_shortcut
 
-    path = create_desktop_shortcut()
+    path = create_desktop_shortcut(demo=is_demo())
     print(f"デスクトップにアイコンを作成しました: {path}")
     return 0
 
@@ -69,6 +71,10 @@ def setup_console() -> None:
 def main() -> int:
     setup_console()
     args = sys.argv[1:]
+    if "--demo" in args:  # テスト環境（サンプルデータ・実際には送信しない）
+        import os
+
+        os.environ["SALES_MAILER_DEMO"] = "1"
     if "--self-test" in args:
         return self_test()
     if "--install-shortcut" in args:
