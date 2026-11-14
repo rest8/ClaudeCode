@@ -91,11 +91,17 @@ jobs:
           done
           test -f dist/SalesMailer-macOS.dmg
 
+      - name: Add the Windows guide
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Copy-Item -LiteralPath 'packaging/windows/はじめにお読みください.txt' -Destination dist/
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
           name: SalesMailer-Windows
-          path: sales_mail_app/dist/SalesMailer.exe
+          path: |
+            sales_mail_app/dist/SalesMailer.exe
+            sales_mail_app/dist/はじめにお読みください.txt
       - uses: actions/upload-artifact@v4
         if: runner.os == 'macOS'
         with:

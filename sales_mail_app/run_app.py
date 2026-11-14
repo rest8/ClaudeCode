@@ -39,13 +39,23 @@ def install_shortcut() -> int:
 
 
 def setup_console() -> None:
-    """Windows のコンソールでも日本語を正しく表示・出力できるよう UTF-8 にする."""
+    """Windows のコンソールでも日本語を正しく表示・出力できるよう UTF-8 にする.
+
+    あわせて「簡易編集モード」を無効にする。有効なままだと、画面をクリックしたときに文字の選択が始まり、
+    選択中はアプリの表示が止まる（固まったように見える）ため。
+    """
     if sys.platform == "win32":
         try:
             import ctypes
 
-            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
-            ctypes.windll.kernel32.SetConsoleCP(65001)
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetConsoleOutputCP(65001)
+            kernel32.SetConsoleCP(65001)
+            handle = kernel32.GetStdHandle(-10)  # 標準入力
+            mode = ctypes.c_uint32()
+            if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+                enable_extended_flags, enable_quick_edit = 0x0080, 0x0040
+                kernel32.SetConsoleMode(handle, (mode.value | enable_extended_flags) & ~enable_quick_edit)
         except Exception:
             pass
     for stream in (sys.stdout, sys.stderr):
