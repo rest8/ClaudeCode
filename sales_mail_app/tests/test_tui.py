@@ -127,8 +127,8 @@ async def test_function_keys_switch_tabs_from_any_widget(seeded):
     async with app.run_test(size=SIZE) as pilot:
         app.query_one("#pane-follow").query_one("#preview", TextArea).focus()
         await pilot.pause()
-        for key, tab in [("f1", "companies"), ("f2", "research"), ("f5", "templates"), ("f7", "settings"),
-                         ("f3", "newmail")]:
+        for key, tab in [("f1", "companies"), ("f2", "autosend"), ("f8", "research"), ("f5", "templates"),
+                         ("f7", "settings"), ("f3", "newmail")]:
             await pilot.press(key)
             await pilot.pause()
             assert app.query_one(TabbedContent).active == tab
@@ -199,7 +199,7 @@ async def test_demo_mode_end_to_end(tmp_path, monkeypatch):
         assert isinstance(app.screen, MessageDialog)  # 送信結果
         await pilot.press("enter")
 
-        await pilot.press("f2")
+        await pilot.press("f8")
         await pilot.pause()
         research = app.query_one("#pane-research")
         research.query_one("#keywords", Input).value = "製造業"
@@ -222,3 +222,63 @@ async def test_demo_mode_end_to_end(tmp_path, monkeypatch):
     # 本番のデータフォルダには何も作られていない
     assert not (tmp_path / "sales_mailer.db").exists()
     assert (tmp_path / "test-env" / "sales_mailer.db").exists()
+
+
+
+async def test_auto_send_tab_imports_excel_and_sends(tmp_path, monkeypatch):
+    """自動送信タブ: Excel を取り込み、テストモードで新規＋フォローをまとめて送る."""
+    openpyxl = pytest.importorskip("openpyxl")
+    from sales_mailer import services
+
+    monkeypatch.setenv("SALES_MAILER_HOME", str(tmp_path))
+    save_settings(Settings(smtp_user="me@mycorp.co.jp", from_name="山田", sender_company="マイコープ",
+                           send_interval_sec=0, shortcut_prompted=True, auto_check_inbox=False))
+    db_path = tmp_path / "sales_mailer.db"
+    db = Database(db_path)
+    old = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S")
+    cid = db.add_company({"name": "送付済み社", "email": "info@sent.co.jp"})
+    db.record_send(cid, "info@sent.co.jp", KIND_NEW, "ご案内", "本文", RESULT_SENT, message_id="<x@y>")
+    db.update_company(cid, {"last_sent_at": old})
+
+    xlsx = tmp_path / "gpt.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active.append(["会社名", "メールアドレス", "業種"])
+    wb.active.append(["エクセル株式会社", "info@excel.co.jp", "製造業"])
+    wb.active.append(["架空株式会社", "info@no-such-domain.co.jp", "製造業"])
+    wb.save(xlsx)
+
+    class FakeChecker:
+        def online(self):
+            return True
+
+        def check_emails(self, emails, progress=None):
+            return {e: "no-such" not in e for e in emails}
+
+    real_import = services.import_companies
+    monkeypatch.setattr("sales_mailer.tui.panes.import_companies",
+                        lambda *a, **k: real_import(*a, checker=FakeChecker(), **k))
+
+    app = make_app(db_path, "autosend")
+    async with app.run_test(size=SIZE) as pilot:
+        pane = app.query_one("#pane-autosend")
+        await pilot.click(pane.query_one("#import"))
+        await pilot.pause()
+        dialog = app.screen
+        dialog.query_one("#path", Input).value = str(xlsx)
+        await pilot.click(dialog.query_one("#ok"))
+        await settle(app, pilot)
+        assert isinstance(app.screen, MessageDialog)  # 取り込み結果
+        assert "存在しないドメイン" in str(app.screen.message)
+        await pilot.press("enter")
+        await pilot.pause()
+        names = [r["company"]["name"] for r in pane.query_one("#targets").data.values()]
+        assert names == ["送付済み社", "エクセル株式会社"]  # フォローが先、架空ドメインは対象外
+        pane.query_one("#dry", Checkbox).value = True
+        await pilot.click(pane.query_one("#run"))
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmDialog)
+        await pilot.press("enter")
+        await settle(app, pilot)
+        assert isinstance(app.screen, MessageDialog)
+        assert "フォロー 1 通・新規 1 通" in str(app.screen.message)
+    assert {r["result"] for r in db.list_send_log()[:2]} == {RESULT_DRY_RUN}

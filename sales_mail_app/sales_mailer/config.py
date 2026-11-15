@@ -86,6 +86,14 @@ class Settings:
     crawl_max_pages: int = 5
     crawl_timeout_sec: int = 10
 
+    # --- 自動送信 ---
+    auto_new_template_id: int = 0      # 0 なら最初の新規メールテンプレート
+    auto_follow: bool = True           # フォローメールも送る
+    auto_check_inbox: bool = True      # 送信前に受信トレイを確認（返信・配信停止を除外）
+    auto_time: str = "09:30"           # 毎日の自動送信の時刻
+    auto_weekdays_only: bool = True    # 平日のみ
+    auto_scheduled: bool = False       # タスク スケジューラに登録済みか
+
     # --- その他 ---
     shortcut_prompted: bool = False  # 初回起動時に「デスクトップにアイコンを作成」を確認済みか
 

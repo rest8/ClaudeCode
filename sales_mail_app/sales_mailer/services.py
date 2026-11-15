@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from .config import Settings, is_demo
@@ -158,3 +159,68 @@ def send_confirmation(kind_label: str, count: int, template_name: str, use_ai: b
 
 def missing_sender_info(settings: Settings) -> bool:
     return not settings.sender_company or not settings.from_name
+
+
+@dataclass
+class ImportReport:
+    recognized: list[str] = field(default_factory=list)
+    total: int = 0
+    added: int = 0
+    updated: int = 0
+    skipped: int = 0
+    no_email: int = 0
+    bad_domain: list[str] = field(default_factory=list)
+    domain_unchecked: bool = False
+
+    def text(self) -> str:
+        lines = [f"読み込んだ行: {self.total} 件（認識した列: {'、'.join(self.recognized)}）", "",
+                 f"追加: {self.added} 件", f"既存企業のステータス更新: {self.updated} 件",
+                 f"スキップ（登録済み・会社名なし）: {self.skipped} 件"]
+        if self.no_email:
+            lines.append(f"メールアドレスが無い・形式が正しくない: {self.no_email} 件（送信対象外）")
+        if self.bad_domain:
+            lines.append(f"存在しないドメインのため送信対象外: {len(self.bad_domain)} 件")
+            lines += [f"  ・{x}" for x in self.bad_domain[:10]]
+            if len(self.bad_domain) > 10:
+                lines.append(f"  ほか {len(self.bad_domain) - 10} 件")
+        if self.domain_unchecked:
+            lines.append("※ インターネットに接続できなかったため、ドメインの確認はしていません。")
+        return "\n".join(lines)
+
+
+def import_companies(db: Database, path: str | Path, status: str = STATUS_NEW, check_domains: bool = True,
+                     progress: Callable[[str], None] | None = None, checker=None) -> ImportReport:
+    """Excel / CSV を取り込む。
+
+    未送付として取り込むときは、メールアドレスのドメインが存在するかを無料で確認し、
+    存在しないもの（AI が作った架空のアドレスなど）は「送信エラー」にして送信対象から外す。
+    """
+    from .csv_io import read_companies_file
+    from .db import STATUS_ERROR, normalize_email
+
+    path = Path(path)
+    rows, recognized = read_companies_file(path)
+    report = ImportReport(recognized=recognized, total=len(rows))
+    source = "excel" if path.suffix.lower() in (".xlsx", ".xlsm") else "csv"
+    for row in rows:
+        row.setdefault("source", source)
+    emails = [normalize_email(r.get("email")) for r in rows]
+    report.no_email = sum(1 for r, e in zip(rows, emails) if r.get("name") and not e)
+    if check_domains and status == STATUS_NEW and not is_demo():
+        from .email_check import DomainChecker
+
+        checker = checker or DomainChecker()
+        if progress:
+            progress("メールアドレスのドメインを確認しています…")
+        results = checker.check_emails([e for e in emails if e],
+                                       (lambda i, n: progress(f"ドメインの確認 {i}/{n}")) if progress else None)
+        report.domain_unchecked = not checker.online()
+        for row, email in zip(rows, emails):
+            if email and results.get(email) is False and not row.get("status"):
+                row["status"] = STATUS_ERROR
+                note = "メールのドメインが存在しないため送信対象外（取り込み時の確認）"
+                row["notes"] = f"{row['notes']} / {note}" if row.get("notes") else note
+                report.bad_domain.append(f"{row.get('name', '')} <{email}>")
+    result = db.import_rows(rows, status=status)
+    report.added, report.updated, report.skipped = result.added, result.updated, result.skipped
+    return report

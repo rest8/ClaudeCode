@@ -80,6 +80,16 @@ jobs:
           $args2 = (New-Object -ComObject WScript.Shell).CreateShortcut($copy).Arguments
           Write-Output "test environment shortcut arguments: $args2"
           if ($args2 -notlike '*--demo*') { throw "unexpected arguments: $args2" }
+          # 自動送信（テスト環境なので送信せずに記録だけ）
+          .\dist\SalesMailer.exe --demo --auto-send
+          if ($LASTEXITCODE -ne 0) { throw "auto-send (test environment) failed" }
+          # 毎日の自動送信をタスク スケジューラに登録・確認・解除
+          .\dist\SalesMailer.exe --schedule-auto-send 09:30
+          if ($LASTEXITCODE -ne 0) { throw "schedule failed" }
+          schtasks /Query /TN "SalesMailer AutoSend" /V /FO LIST | Select-String -Pattern "Task To Run|Schedule Type|Start Time|Days"
+          if ($LASTEXITCODE -ne 0) { throw "scheduled task not found" }
+          .\dist\SalesMailer.exe --unschedule-auto-send
+          if ($LASTEXITCODE -ne 0) { throw "unschedule failed" }
 
       - name: Self-test, desktop icon and installer disk image (macOS)
         if: runner.os == 'macOS'

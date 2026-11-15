@@ -1,9 +1,12 @@
 """営業メール自動化の起動スクリプト（PyInstaller のエントリポイント）.
 
     python run_app.py                    ターミナル版（既定。デスクトップのアイコンから起動される画面）
-    python run_app.py --tab follow       指定したタブで開く（companies/research/newmail/follow/
-                                         templates/history/settings）
+    python run_app.py --tab autosend     指定したタブで開く（companies/autosend/newmail/follow/
+                                         templates/history/settings/research）
     python run_app.py --demo             テスト環境（サンプルデータ・メールは実際には送信しない・費用なし）
+    python run_app.py --auto-send        画面を開かずに自動送信して終了（タスク スケジューラから起動される）
+    python run_app.py --schedule-auto-send 09:30 [--every-day]  毎日の自動送信を登録（Windows）
+    python run_app.py --unschedule-auto-send                    登録を解除
     python run_app.py --gui              ウィンドウ版（Tkinter）
     python run_app.py --install-shortcut デスクトップにアイコンを作成
     python run_app.py --self-test        依存関係の読み込みだけ確認して終了（ビルド確認用）
@@ -17,6 +20,7 @@ def self_test() -> int:
     from pathlib import Path
 
     import anthropic  # AI 機能で使用
+    import openpyxl  # noqa: F401  Excel の取り込み・書き出し
     import textual  # ターミナル版の画面
 
     from sales_mailer import __version__
@@ -26,6 +30,10 @@ def self_test() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         assert Database(Path(tmp) / "check.db").list_templates()
+        from sales_mailer.csv_io import read_companies_file, write_import_template
+
+        write_import_template(Path(tmp) / "template.xlsx")
+        assert read_companies_file(Path(tmp) / "template.xlsx")[0]
     assert (assets_dir() / "icon.png").exists(), "icon.png が同梱されていません"
     print(f"SalesMailer {__version__} self-test OK (anthropic {anthropic.__version__}, textual {textual.__name__})")
     return 0
@@ -68,6 +76,64 @@ def setup_console() -> None:
                 pass
 
 
+def auto_send() -> int:
+    """タスク スケジューラなどから起動され、画面を開かずに自動送信して終了する."""
+    import threading
+    from datetime import datetime
+
+    from sales_mailer.autosend import run_auto_send
+    from sales_mailer.config import data_dir, is_demo, load_settings, save_settings, settings_path
+    from sales_mailer.db import Database
+
+    if is_demo():
+        from sales_mailer.demo import demo_settings, ensure_seeded
+
+        if not settings_path().exists():
+            save_settings(demo_settings())
+    settings = load_settings()
+    db = Database(data_dir() / "sales_mailer.db")
+    if is_demo():
+        ensure_seeded(db)
+    log_path = data_dir() / "auto-send.log"
+
+    def progress(message: str) -> None:
+        line = f"{datetime.now():%Y-%m-%d %H:%M:%S} {message}"
+        print(line, flush=True)
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+
+    progress("=== 自動送信を開始します（このウィンドウを閉じると送信は止まります） ===")
+    if not is_demo() and not settings.smtp_user:
+        progress("メール送信（SMTP）が設定されていないため送信できません。アプリの設定タブで設定してください。")
+        return 1
+    try:
+        result = run_auto_send(db, settings, progress, threading.Event())
+    except KeyboardInterrupt:
+        progress("中断しました")
+        return 1
+    hard_failure = bool(result.aborted_reason) and "上限" not in result.aborted_reason
+    return 1 if hard_failure else 0
+
+
+def schedule(args: list[str]) -> int:
+    from sales_mailer import scheduler
+
+    try:
+        if "--unschedule-auto-send" in args:
+            print(scheduler.unregister())
+        else:
+            index = args.index("--schedule-auto-send")
+            time_str = args[index + 1] if index + 1 < len(args) else "09:30"
+            print(scheduler.register(time_str, weekdays_only="--every-day" not in args))
+    except scheduler.SchedulerError as e:
+        print(f"エラー: {e}")
+        return 1
+    return 0
+
+
 def main() -> int:
     setup_console()
     args = sys.argv[1:]
@@ -79,6 +145,10 @@ def main() -> int:
         return self_test()
     if "--install-shortcut" in args:
         return install_shortcut()
+    if "--auto-send" in args:
+        return auto_send()
+    if "--schedule-auto-send" in args or "--unschedule-auto-send" in args:
+        return schedule(args)
     if "--gui" in args:
         from sales_mailer.gui.app import main as gui_main
 

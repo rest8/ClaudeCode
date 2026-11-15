@@ -18,7 +18,7 @@ from textual.widgets import (
 
 from ..campaign import SendOptions, prepare_mail, run_send_job, send_test_mail
 from ..config import Settings, data_dir, is_demo
-from ..csv_io import read_companies_csv, write_companies_csv, write_rows_csv
+from ..csv_io import write_companies, write_import_template, write_rows
 from ..db import (
     KIND_FOLLOW, KIND_NEW, RESULT_DRY_RUN, RESULT_FAILED, RESULT_SENT, STATUS_CONTRACTED, STATUS_ERROR,
     STATUS_LABELS, STATUS_NEW, STATUS_OPTED_OUT, STATUS_REPLIED, STATUS_SENT,
@@ -27,8 +27,8 @@ from ..mailer import PLACEHOLDERS, days_since, format_date_jp, signature
 from ..regions import PREFECTURES
 from ..research import Prospect
 from ..services import (
-    ADDED, METHOD_CLAUDE, METHOD_GOOGLE, METHOD_LABELS, add_prospects, judge_label, missing_sender_info,
-    run_research, send_confirmation,
+    ADDED, METHOD_CLAUDE, METHOD_GOOGLE, METHOD_LABELS, add_prospects, import_companies, judge_label,
+    missing_sender_info, run_research, send_confirmation,
 )
 from ..shortcut import create_desktop_shortcut, desktop_dir
 from .dialogs import ChoiceDialog, CompanyForm, ConfirmDialog, ImportDialog, InputDialog, MessageDialog
@@ -72,6 +72,34 @@ class BasePane(Container):
         else:
             self.app.push_screen(MessageDialog(str(e), "エラー"))
 
+    async def import_file(self) -> None:
+        """Excel / CSV を取り込む（企業リストタブ・自動送信タブで共通）."""
+        result = await self.app.push_screen_wait(ImportDialog())
+        if not result:
+            return
+        path, status = clean_path(result[0]), result[1]
+        if not path:
+            self.notify("取り込むファイルを指定してください", severity="warning")
+            return
+        self.notify("取り込んでいます…")
+
+        def progress(text: str) -> None:
+            if text.endswith("確認しています…"):
+                self.app.call_from_thread(self.notify, text)
+
+        def done(report) -> None:
+            self.app.data_changed()
+            self.after_import()
+            self.app.push_screen(MessageDialog(report.text(), "取り込み結果"))
+
+        def failed(e: Exception) -> None:
+            self.app.push_screen(MessageDialog(str(e), "取り込みエラー"))
+
+        self.run_bg(lambda: import_companies(self.db, path, status, progress=progress), done, failed)
+
+    def after_import(self) -> None:
+        pass
+
     def need_ai_key(self) -> bool:
         if self.app.has_ai_key():
             return True
@@ -110,7 +138,7 @@ class CompaniesPane(BasePane):
     BINDINGS = [
         Binding("a", "add", "追加"), Binding("e", "edit", "編集"), Binding("c", "contract", "契約済みに"),
         Binding("s", "status", "ステータス変更"), Binding("delete", "delete", "削除"),
-        Binding("i", "import_csv", "CSV取込"), Binding("x", "export_csv", "CSV出力"),
+        Binding("i", "import_csv", "Excel取込"), Binding("x", "export_csv", "Excel出力"),
         Binding("slash", "focus_search", "検索", show=False),
     ]
 
@@ -126,8 +154,8 @@ class CompaniesPane(BasePane):
             yield Button("削除(Del)", id="delete", compact=True)
             yield Button("契約済みにする＝除外(c)", id="contract", variant="warning", compact=True)
             yield Button("ステータス変更(s)", id="status", compact=True)
-            yield Button("CSV取込(i)", id="import", compact=True)
-            yield Button("CSV出力(x)", id="export", compact=True)
+            yield Button("Excel/CSV取込(i)", id="import", compact=True)
+            yield Button("Excel出力(x)", id="export", compact=True)
         yield MarkTable(COMPANY_COLUMNS, id="table")
         yield Static("Space: チェック　Ctrl+A: 全チェック　Enter: 編集　※ 操作はチェックした企業（無ければカーソル行）が対象。"
                      "契約済み・配信停止は既定の表示とすべての送信対象から除外されます。", classes="help", markup=False)
@@ -206,7 +234,8 @@ class CompaniesPane(BasePane):
         if not row:
             return
         company = self.db.get_company(row["id"])
-        data = await self.app.push_screen_wait(CompanyForm(company))
+        history = self.db.list_send_log(company_id=row["id"], limit=50)
+        data = await self.app.push_screen_wait(CompanyForm(company, history))
         if not data:
             return
         self.db.update_company(row["id"], data)
@@ -254,33 +283,19 @@ class CompaniesPane(BasePane):
 
     @work
     async def action_import_csv(self) -> None:
-        result = await self.app.push_screen_wait(ImportDialog())
-        if not result:
-            return
-        path, status = clean_path(result[0]), result[1]
-        try:
-            rows, recognized = read_companies_csv(path)
-        except (OSError, ValueError) as e:
-            await self.app.push_screen_wait(MessageDialog(str(e), "CSV取り込みエラー"))
-            return
-        for row in rows:
-            row.setdefault("source", "csv")
-        res = self.db.import_rows(rows, status=status)
-        self.app.data_changed()
-        await self.app.push_screen_wait(MessageDialog(
-            f"認識した列: {'、'.join(recognized)}\n\n追加: {res.added} 件\n既存企業のステータス更新: {res.updated} 件\n"
-            f"スキップ（重複・会社名なし）: {res.skipped} 件", "CSV取り込み"))
+        await self.import_file()
 
     @work
     async def action_export_csv(self) -> None:
-        default = desktop_dir() / f"企業リスト_{datetime.now():%Y%m%d}.csv"
-        path = await self.app.push_screen_wait(InputDialog("書き出し先のファイル", str(default), ok="書き出す",
-                                                          hint="現在の表示（絞り込み結果）を書き出します。"))
+        default = desktop_dir() / f"企業リスト_{datetime.now():%Y%m%d}.xlsx"
+        path = await self.app.push_screen_wait(InputDialog(
+            "書き出し先のファイル", str(default), ok="書き出す",
+            hint="現在の表示（絞り込み結果）を書き出します。拡張子を .csv にすると CSV で書き出します。"))
         if not path:
             return
         rows = list(self.table.data.values())
         try:
-            write_companies_csv(clean_path(path), rows)
+            write_companies(clean_path(path), rows)
         except OSError as e:
             self.notify(f"書き出せませんでした: {e}", severity="error", markup=False)
             return
@@ -976,7 +991,7 @@ class HistoryPane(BasePane):
             yield Select([(v, k) for k, v in HISTORY_RESULT.items()], prompt="結果: すべて", id="result",
                          compact=True)
             yield Button("更新", id="reload", compact=True)
-            yield Button("CSV出力", id="export", compact=True)
+            yield Button("Excel出力", id="export", compact=True)
             yield Static("", id="count", markup=False)
         yield MarkTable([("sent_at", "日時"), ("kind", "種別"), ("company", "会社名"), ("email", "宛先"),
                          ("subject", "件名"), ("result", "結果"), ("error", "エラー")], markable=False, id="table")
@@ -1016,15 +1031,264 @@ class HistoryPane(BasePane):
         if event.button.id == "reload":
             self.reload()
             return
-        default = desktop_dir() / f"送信履歴_{datetime.now():%Y%m%d}.csv"
-        path = await self.app.push_screen_wait(InputDialog("書き出し先のファイル", str(default), ok="書き出す"))
+        default = desktop_dir() / f"送信履歴_{datetime.now():%Y%m%d}.xlsx"
+        path = await self.app.push_screen_wait(InputDialog(
+            "書き出し先のファイル", str(default), ok="書き出す", hint="拡張子を .csv にすると CSV で書き出します。"))
         if not path:
             return
         rows = list(self.query_one("#table", MarkTable).data.values())
-        write_rows_csv(clean_path(path), ["日時", "種別", "会社名", "宛先", "件名", "結果", "エラー"],
+        try:
+            write_rows(clean_path(path), ["日時", "種別", "会社名", "宛先", "件名", "結果", "エラー", "本文"],
                        [[r["sent_at"], history_kind(r), r["company_name"], r["email"], r["subject"],
-                         HISTORY_RESULT.get(r["result"], r["result"]), r["error"]] for r in rows])
+                         HISTORY_RESULT.get(r["result"], r["result"]), r["error"], r["body"]] for r in rows],
+                       "送信履歴")
+        except OSError as e:
+            self.notify(f"書き出せませんでした: {e}", severity="error", markup=False)
+            return
         self.notify(f"{len(rows)} 件を書き出しました: {clean_path(path)}", markup=False, timeout=8)
+
+
+# ======================================================================= 自動送信
+class AutoSendPane(BasePane):
+    """Excel で取り込んだ企業への新規メールと、フォローメールをまとめて自動で送る（費用なし）."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.stop_event = threading.Event()
+
+    def compose(self) -> ComposeResult:
+        s = self.settings
+        with Horizontal(classes="pane"):
+            with VerticalScroll(classes="left wide-left"):
+                yield Label("1. Excel でリストを取り込む", classes="label")
+                with Horizontal(classes="row tight"):
+                    yield Button("Excelを取り込む", id="import", variant="primary", compact=True)
+                    yield Button("ひな形を書き出す", id="template-xlsx", compact=True)
+                yield Static("AI（GPTなど）で作った表を、そのまま取り込めます。登録済みの企業は重複せず、"
+                             "存在しないドメインのアドレスは自動で送信対象外になります。",
+                             classes="help", markup=False)
+                yield Label("2. 送る内容", classes="label")
+                with Horizontal(classes="row tight"):
+                    yield Label("新規メール ")
+                    yield Select([], prompt="テンプレート", id="template", compact=True)
+                yield Checkbox(f"フォローも送る（{s.follow_after_days}日後・最大{s.max_follow_count}回）",
+                               s.auto_follow, id="follow", compact=True)
+                yield Checkbox("送信前に受信トレイを確認（返信を除外）", s.auto_check_inbox, id="inbox",
+                               compact=True)
+                yield Label("3. 送信する", classes="label")
+                yield Checkbox("テストモード（実際には送信しない）", id="dry", compact=True)
+                with Horizontal(classes="row tight"):
+                    yield Button("▶ 今すぐ自動送信", id="run", variant="primary", compact=True)
+                    yield Button("停止", id="stop", disabled=True, compact=True)
+                yield Label("4. 毎日自動で送信（Windows）", classes="label")
+                with Horizontal(classes="row tight"):
+                    yield Label("時刻 ")
+                    yield Input(s.auto_time, id="time", compact=True, classes="time")
+                    yield Checkbox("平日のみ", s.auto_weekdays_only, id="weekdays", compact=True)
+                with Horizontal(classes="row tight"):
+                    yield Button("登録する", id="schedule", variant="success", compact=True)
+                    yield Button("解除する", id="unschedule", compact=True)
+                yield Static("", id="schedule-status", classes="help", markup=False)
+            with Vertical(classes="right"):
+                yield Static("", id="plan", markup=False)
+                yield MarkTable([("kind", "種別"), ("name", "会社名"), ("email", "メールアドレス"),
+                                 ("template", "テンプレート"), ("when", "送信")], markable=False, id="targets")
+                yield RichLog(id="log", classes="log", wrap=True)
+
+    def on_mount(self) -> None:
+        self.load_templates()
+        if is_demo():
+            dry = self.query_one("#dry", Checkbox)
+            dry.value = True
+            dry.disabled = True
+        self.refresh_plan()
+        self.update_schedule_status()
+
+    def on_show(self) -> None:
+        self.load_templates()
+        self.refresh_plan()
+        self.update_schedule_status()
+
+    def after_import(self) -> None:
+        self.refresh_plan()
+
+    def write_log(self, text: str) -> None:
+        self.query_one("#log", RichLog).write(text)
+
+    def load_templates(self) -> None:
+        select = self.query_one("#template", Select)
+        templates = self.db.list_templates(KIND_NEW)
+        with self.prevent(Select.Changed):
+            select.set_options([(t["name"], t["id"]) for t in templates])
+            ids = [t["id"] for t in templates]
+            wanted = self.settings.auto_new_template_id
+            if wanted in ids:
+                select.value = wanted
+            elif ids:
+                select.value = ids[0]
+
+    def refresh_plan(self) -> None:
+        from ..autosend import make_plan
+
+        plan = make_plan(self.db, self.settings)
+        self.query_one("#plan", Static).update(plan.summary())
+        rows = plan.rows()
+        self.query_one("#targets", MarkTable).set_rows(
+            rows,
+            lambda r: [r["kind"], r["company"]["name"], r["company"]["email"],
+                       (r["template"] or {}).get("name", ""), "今日" if r["within"] else "明日以降"],
+            key=lambda r: f"{r['kind']}-{r['company']['id']}",
+            style=lambda r: "" if r["within"] else "muted",
+        )
+
+    def save_options(self) -> None:
+        template = self.query_one("#template", Select).value
+        settings = replace(
+            self.settings,
+            auto_new_template_id=0 if template is Select.NULL else int(template),
+            auto_follow=self.query_one("#follow", Checkbox).value,
+            auto_check_inbox=self.query_one("#inbox", Checkbox).value,
+            auto_weekdays_only=self.query_one("#weekdays", Checkbox).value,
+        )
+        self.app.update_settings(settings)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "template" and self.is_mounted:
+            self.save_options()
+            self.refresh_plan()
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if event.checkbox.id in ("follow", "inbox", "weekdays"):
+            self.save_options()
+            if event.checkbox.id == "follow":
+                self.refresh_plan()
+
+    def update_schedule_status(self) -> None:
+        s = self.settings
+        if is_demo():
+            text = "テスト環境では毎日の自動送信は登録できません。"
+        elif s.auto_scheduled:
+            text = (f"登録済み: {'平日' if s.auto_weekdays_only else '毎日'} {s.auto_time} に自動送信します。"
+                    "パソコンの電源が入っていてログインしている必要があります。")
+        else:
+            text = "未登録（登録すると、アプリを開いていなくても指定時刻に自動で送信します）"
+        self.query_one("#schedule-status", Static).update(text)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id
+        if bid == "import":
+            self.run_worker(self.import_file(), exclusive=False)
+        elif bid == "template-xlsx":
+            self.export_template()
+        elif bid == "run":
+            self.run_now()
+        elif bid == "stop":
+            self.stop_event.set()
+            self.write_log("停止しています…（送信中の1通が終わると止まります）")
+        elif bid in ("schedule", "unschedule"):
+            self.change_schedule(bid == "schedule")
+
+    @work
+    async def export_template(self) -> None:
+        default = desktop_dir() / "営業リスト_ひな形.xlsx"
+        path = await self.app.push_screen_wait(InputDialog(
+            "ひな形の保存先", str(default), ok="書き出す",
+            hint="列名（会社名・メールアドレス など）と、GPT への頼み方の例が入った Excel を書き出します。"))
+        if not path:
+            return
+        try:
+            write_import_template(clean_path(path))
+        except OSError as e:
+            self.notify(f"書き出せませんでした: {e}", severity="error", markup=False)
+            return
+        self.notify(f"ひな形を書き出しました: {clean_path(path)}", markup=False, timeout=8)
+
+    @work
+    async def run_now(self) -> None:
+        from ..autosend import make_plan, run_auto_send
+
+        if self.busy:
+            return
+        self.save_options()
+        settings = self.settings
+        dry = is_demo() or self.query_one("#dry", Checkbox).value
+        if not dry and not settings.smtp_user:
+            self.notify("設定タブ（F7）でメール送信（SMTP）を設定してください", severity="warning")
+            return
+        plan = make_plan(self.db, settings)
+        total = min(plan.remaining, plan.follow_total + len(plan.new_targets))
+        if total == 0:
+            await self.app.push_screen_wait(MessageDialog(plan.summary() + "\n\n今日送るメールはありません。", "自動送信"))
+            return
+        if not dry and missing_sender_info(settings) and not await self.app.push_screen_wait(ConfirmDialog(
+                "設定の「会社名」「送信者名」が未入力です。\n特定電子メール法で必要な送信者の表示が不足します。"
+                "このまま送信しますか？", "送信者情報")):
+            return
+        minutes = total * settings.send_interval_sec / 60
+        head = "【テストモード：実際には送信しません】\n" if dry else ""
+        message = (f"{head}今から {total} 通を自動で送ります。\n\n{plan.summary()}\n"
+                   f"新規メールのテンプレート: {(plan.new_template or {}).get('name', '-')}\n"
+                   f"送信間隔: {settings.send_interval_sec} 秒（所要時間の目安 約{minutes:.0f}分）\n\n"
+                   "送信中も、ほかのタブで作業できます。")
+        if not await self.app.push_screen_wait(ConfirmDialog(message, "自動送信の確認", ok="送信する", cancel="やめる")):
+            return
+        self.busy = True
+        self.stop_event.clear()
+        self.query_one("#run", Button).disabled = True
+        self.query_one("#stop", Button).disabled = False
+        self.query_one("#log", RichLog).clear()
+
+        def progress(text: str) -> None:
+            def ui() -> None:
+                self.write_log(text)
+                self.app.refresh_stats()
+            self.app.call_from_thread(ui)
+
+        def finish() -> None:
+            self.busy = False
+            self.query_one("#run", Button).disabled = False
+            self.query_one("#stop", Button).disabled = True
+            self.app.data_changed()
+            self.refresh_plan()
+
+        def done(result) -> None:
+            finish()
+            self.app.push_screen(MessageDialog(result.text(), "自動送信の結果"))
+
+        def failed(e: Exception) -> None:
+            finish()
+            self.app.push_screen(MessageDialog(str(e), "自動送信エラー"))
+
+        self.run_bg(lambda: run_auto_send(self.db, settings, progress, self.stop_event, dry_run=dry), done, failed)
+
+    def change_schedule(self, enable: bool) -> None:
+        from .. import scheduler
+
+        if is_demo():
+            self.notify("テスト環境では毎日の自動送信は登録できません", severity="warning")
+            return
+        time_input = self.query_one("#time", Input)
+        try:
+            time_str = scheduler.validate_time(time_input.value)
+        except scheduler.SchedulerError as e:
+            self.notify(str(e), severity="warning")
+            return
+        weekdays = self.query_one("#weekdays", Checkbox).value
+        if enable and not self.settings.smtp_user:
+            self.notify("先に設定タブ（F7）でメール送信（SMTP）を設定してください", severity="warning")
+            return
+
+        def work_fn() -> str:
+            return scheduler.register(time_str, weekdays) if enable else scheduler.unregister()
+
+        def done(message: str) -> None:
+            time_input.value = time_str
+            self.app.update_settings(replace(self.settings, auto_time=time_str, auto_weekdays_only=weekdays,
+                                             auto_scheduled=enable))
+            self.update_schedule_status()
+            self.app.push_screen(MessageDialog(message, "毎日の自動送信"))
+
+        self.run_bg(work_fn, done, lambda e: self.app.push_screen(MessageDialog(str(e), "毎日の自動送信")))
 
 
 # ======================================================================= 設定

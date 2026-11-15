@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
@@ -33,6 +35,9 @@ ModalScreen { align: center middle; }
 #company-form Grid { grid-size: 2; grid-columns: 16 1fr; grid-rows: auto; height: auto; grid-gutter: 0 1; }
 #company-form Grid Label { padding-top: 0; }
 #company-form TextArea { height: 4; }
+.path-row { height: auto; }
+.path-row Input { width: 1fr; }
+.path-row Button { width: auto; min-width: 8; margin-left: 1; }
 """
 
 
@@ -155,20 +160,47 @@ IMPORT_CHOICES = [
 ]
 
 
+def can_pick_file() -> bool:
+    """Windows ではファイルを選ぶ画面（エクスプローラー）を使える."""
+    return sys.platform == "win32"
+
+
+def pick_file_dialog() -> str:
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.attributes("-topmost", True)
+        return filedialog.askopenfilename(
+            parent=root, title="取り込む Excel / CSV ファイルを選んでください",
+            filetypes=[("Excel / CSV", "*.xlsx *.xlsm *.csv"), ("すべてのファイル", "*.*")]) or ""
+    finally:
+        root.destroy()
+
+
 class ImportDialog(ModalScreen[tuple[str, str] | None]):
     BINDINGS = [Binding("escape", "cancel", "キャンセル")]
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label("CSV取り込み", classes="title")
-            yield Static("CSVファイルのパス（ファイルをこの画面にドラッグ＆ドロップしても入力できます）", classes="hint")
-            yield Input(id="path", placeholder="例: C:\\Users\\you\\Desktop\\企業リスト.csv")
+            yield Label("Excel / CSV の取り込み", classes="title")
+            hint = "Excel（.xlsx）か CSV ファイルの場所。"
+            hint += "「参照…」で選ぶか、" if can_pick_file() else ""
+            hint += "ファイルをこの画面にドラッグ＆ドロップしても入力できます。"
+            yield Static(hint, classes="hint")
+            with Horizontal(classes="path-row"):
+                yield Input(id="path", placeholder="例: C:\\Users\\you\\Desktop\\企業リスト.xlsx")
+                if can_pick_file():
+                    yield Button("参照…", id="browse")
             yield Label("取り込む企業の扱い")
             with RadioSet(id="status"):
                 for i, (_value, label) in enumerate(IMPORT_CHOICES):
                     yield RadioButton(label, value=i == 0)
-            yield Static("※「ステータス」列がある行はその値を優先します。登録済みの企業（同じメール・ドメイン・会社名）は"
-                         "重複登録しません。契約済み／配信停止として取り込むと、登録済みの企業もそのステータスに更新します。",
+            yield Static("※ 1行目（またはタイトルの下の行）に「会社名」「メールアドレス」などの列名が必要です。"
+                         "「ステータス」列がある行はその値を優先します。登録済みの企業（同じメール・ドメイン・会社名）は"
+                         "重複登録しません。未送付として取り込むと、存在しないドメインのアドレスは自動で送信対象外にします。",
                          classes="hint")
             with Horizontal(classes="buttons"):
                 yield Button("キャンセル", id="cancel")
@@ -178,12 +210,28 @@ class ImportDialog(ModalScreen[tuple[str, str] | None]):
         self.query_one("#path", Input).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "browse":
+            self.run_worker(self._browse, thread=True, exit_on_error=False)
+            return
         if event.button.id != "ok":
             self.dismiss(None)
             return
         index = self.query_one(RadioSet).pressed_index
         status = IMPORT_CHOICES[index if index >= 0 else 0][0]
         self.dismiss((self.query_one("#path", Input).value, status))
+
+    def _browse(self) -> None:
+        try:
+            path = pick_file_dialog()
+        except Exception as e:  # noqa: BLE001
+            self.app.call_from_thread(self.notify, f"ファイルを選ぶ画面を開けませんでした: {e}", severity="warning")
+            return
+        if path:
+            self.app.call_from_thread(self._set_path, path)
+
+    def _set_path(self, path: str) -> None:
+        self.query_one("#path", Input).value = path
+        self.query_one("#ok", Button).focus()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -199,9 +247,10 @@ class CompanyForm(ModalScreen[dict | None]):
         ("description", "事業内容"),
     ]
 
-    def __init__(self, company: dict | None = None):
+    def __init__(self, company: dict | None = None, history: list[dict] | None = None):
         super().__init__()
         self.company = company or {}
+        self.history = history or []
 
     def compose(self) -> ComposeResult:
         c = self.company
@@ -224,6 +273,16 @@ class CompanyForm(ModalScreen[dict | None]):
                     yield Static(f"初回送信: {format_date_jp(c.get('first_sent_at')) or '-'}　"
                                  f"最終送信: {format_date_jp(c.get('last_sent_at')) or '-'}　"
                                  f"フォロー: {c.get('follow_count', 0)} 回", classes="hint")
+                    yield Label("送信履歴", classes="title")
+                    if self.history:
+                        kinds = {"new": "新規", "follow": "フォロー", "test": "テスト"}
+                        results = {"sent": "送信済み", "failed": "失敗", "dry_run": "テスト（未送信）"}
+                        lines = [f"{h['sent_at'][:16]}  {kinds.get(h['kind'], h['kind'])}  "
+                                 f"{results.get(h['result'], h['result'])}  {h['subject']}"
+                                 + (f"（{h['error']}）" if h["error"] else "") for h in self.history[:20]]
+                        yield Static("\n".join(lines), classes="hint", markup=False)
+                    else:
+                        yield Static("まだ送信していません", classes="hint")
             with Horizontal(classes="buttons"):
                 yield Button("キャンセル", id="cancel")
                 yield Button("保存 (Ctrl+S)", id="ok", variant="primary")

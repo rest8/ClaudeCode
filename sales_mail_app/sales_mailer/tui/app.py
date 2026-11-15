@@ -19,7 +19,8 @@ from ..db import Database
 from ..services import stats_text
 from .dialogs import DIALOG_CSS, ConfirmDialog, MessageDialog
 from .panes import (
-    BasePane, CompaniesPane, FollowMailPane, HistoryPane, NewMailPane, ResearchPane, SettingsPane, TemplatesPane,
+    AutoSendPane, BasePane, CompaniesPane, FollowMailPane, HistoryPane, NewMailPane, ResearchPane, SettingsPane,
+    TemplatesPane,
 )
 
 APP_CSS = """
@@ -44,6 +45,8 @@ BasePane { height: 1fr; }
 .help { color: $text-muted; margin-top: 1; height: auto; }
 .wide { width: 100%; margin-top: 1; }
 Input.num { width: 7; }
+Input.time { width: 8; margin-right: 2; }
+.wide-left { width: 50; }
 #search { width: 30; }
 MarkTable { height: 1fr; min-height: 5; margin-top: 1; }
 PrefPicker { height: 1fr; min-height: 6; }
@@ -67,12 +70,13 @@ Vertical.section { height: auto; border: round $primary; padding: 0 1; }
 
 TABS = [
     ("companies", "F1 企業リスト", CompaniesPane),
-    ("research", "F2 新規開拓", ResearchPane),
+    ("autosend", "F2 自動送信", AutoSendPane),
     ("newmail", "F3 新規メール", NewMailPane),
     ("follow", "F4 フォロー", FollowMailPane),
     ("templates", "F5 テンプレート", TemplatesPane),
     ("history", "F6 送信履歴", HistoryPane),
     ("settings", "F7 設定", SettingsPane),
+    ("research", "F8 新規開拓", ResearchPane),
 ]
 
 

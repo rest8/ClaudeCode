@@ -607,8 +607,12 @@ class Database:
             ).fetchone()
             return int(row[0])
 
-    def list_send_log(self, kind: str | None = None, result: str | None = None, limit: int = 2000) -> list[dict]:
+    def list_send_log(self, kind: str | None = None, result: str | None = None, limit: int = 2000,
+                      company_id: int | None = None) -> list[dict]:
         where, params = [], []
+        if company_id is not None:
+            where.append("company_id = ?")
+            params.append(company_id)
         if kind:
             where.append("kind = ?")
             params.append(kind)

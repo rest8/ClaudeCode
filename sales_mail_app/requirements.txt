@@ -1,3 +1,4 @@
 # 実行に必要なライブラリ（ウィンドウ版の Tkinter は Python 標準添付）
 anthropic>=2.8,<3
 textual>=8.2,<9
+openpyxl>=3.1,<4
